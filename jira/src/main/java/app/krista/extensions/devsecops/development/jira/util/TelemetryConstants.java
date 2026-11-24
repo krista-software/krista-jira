@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.util;
@@ -134,6 +134,11 @@ public class TelemetryConstants {
         public static final String GET_USER_ISSUES_REQUEST_FAILURE = "Jira.RitualsArea.getUserIssues.failure";
         public static final String GET_USER_ISSUES_REQUEST_SUCCESS = "Jira.RitualsArea.getUserIssues.success";
         public static final String GET_USER_ISSUES_RETRY_ATTEMPT = "Jira.RitualsArea.getUserIssues.retry.attempt";
+
+        // Get Issues By User Names
+        public static final String GET_ISSUES_BY_USER_NAMES_REQUEST_COUNT = "Jira.RitualsArea.getIssuesByUserNames.count";
+        public static final String GET_ISSUES_BY_USER_NAMES_REQUEST_FAILURE = "Jira.RitualsArea.getIssuesByUserNames.failure";
+        public static final String GET_ISSUES_BY_USER_NAMES_REQUEST_SUCCESS = "Jira.RitualsArea.getIssuesByUserNames.success";
 
         // Assign Task to User
         public static final String ASSIGN_TASK_TO_USER_REQUEST_COUNT = "Jira.RitualsArea.assignTaskToUser.count";

@@ -13,17 +13,19 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entityrequests.impl;
 
+import app.krista.extension.executor.QueryClause;
 import app.krista.extension.executor.SearchCondition;
 import app.krista.extension.executor.SearchQuery;
 import app.krista.extensions.devsecops.development.jira.catalog.entities.Bug;
 import app.krista.extensions.devsecops.development.jira.catalog.entities.Issue;
 import app.krista.extensions.devsecops.development.jira.catalog.entityrequests.EntityImplementationService;
 import app.krista.extensions.devsecops.development.jira.impl.IssueDao;
+import app.krista.extensions.devsecops.development.jira.impl.SearchConditionTranslator;
 import app.krista.extensions.devsecops.development.jira.util.IssueMapper;
 import app.krista.extensions.devsecops.development.jira.util.JiraConstants;
 import app.krista.model.base.EntityValue;
@@ -92,37 +94,35 @@ public final class BugImpl extends EntityImplementationService {
 
     @Override
     public List<EntityValue> search(EntityType entityType, SearchQuery searchQueries, Long pageIndex, Integer pageSize) {
-        List<SearchCondition> conditions = searchQueries.getSearchConditions();
-        List<EntityValue> list = new ArrayList<>();
-        List<Issue> issues;
-        String projectKey = getConditionValue(conditions, JiraConstants.PROJECT_KEY);
-        for (SearchCondition condition : conditions) {
-            String selector = condition.getFieldName();
-            String matchPattern = condition.getOperand() != null ? String.valueOf(condition.getOperand()).trim() : "";
-            switch (selector.toLowerCase(Locale.ROOT)) {
-                case "summary":
-                    issues = searchBySummaryIssueTypeProjectKey(projectKey, matchPattern, JiraConstants.BUG, pageSize, pageIndex);
-                    list = getEntityList(issues, pageSize, entityType.getEntityName());
-                    break;
-                case "description":
-                    issues = searchByTextIssueTypeProjectKey(projectKey, matchPattern, JiraConstants.BUG, pageSize, pageIndex);
-                    list = getEntityList(issues, pageSize, entityType.getEntityName());
-                    break;
-                case "status":
-                    issues = getIssuesByStatus(matchPattern);
-                    list = getEntityList(issues, pageSize, entityType.getEntityName());
-                    break;
-                case "bug key":
-                    Issue issue = getIssueService().getIssueFinal(matchPattern);
-                    if (JiraConstants.BUG.equalsIgnoreCase(issue.issueType))
-                        list.add(new EntityValue(entityType.getEntityName(), IssueMapper.getBug(issue).toFields()));
+        List<SearchCondition> conditions = resolveUserConditions(searchQueries.getSearchConditions());
+        List<QueryClause> clauses = searchQueries.getQueryClauses();
+
+        // Special case: single Bug Key lookup by equals or null operator — direct GET
+        if (conditions.size() == 1) {
+            SearchCondition only = conditions.get(0);
+            if ("bug key".equalsIgnoreCase(only.getFieldName())
+                    && only.getOperand() != null
+                    && (only.getOperator() == null
+                        || only.getOperator() == SearchCondition.Operator.equals)) {
+                String key = String.valueOf(only.getOperand()).trim();
+                Issue issue = getIssueService().getIssueFinal(key);
+                if (issue != null && JiraConstants.BUG.equalsIgnoreCase(issue.issueType)) {
+                    return List.of(new EntityValue(entityType.getEntityName(), IssueMapper.getBug(issue).toFields()));
+                }
+                return List.of();
             }
         }
-        if (conditions.size() == 1 && list.isEmpty()) {
-            issues = searchBySummaryIssueType("", JiraConstants.BUG, pageSize, pageIndex);
-            list = getEntityList(issues, pageSize, entityType.getEntityName());
+
+        // Build JQL from all conditions and clauses, filtered by issuetype = "Bug"
+        String jql = SearchConditionTranslator.toJql(conditions, clauses, JiraConstants.BUG);
+
+        if (jql == null || jql.isBlank()) {
+            List<Issue> issues = searchBySummaryIssueType("", JiraConstants.BUG, pageSize, pageIndex);
+            return getEntityList(issues, pageSize, entityType.getEntityName());
         }
-        return list;
+
+        List<Issue> issues = getIssueService().searchByJQL(jql, pageSize, pageIndex);
+        return getEntityList(issues, pageSize, entityType.getEntityName());
     }
 
     private List<EntityValue> getEntityList(List<Issue> issues, Integer pageSize, String entityName) {

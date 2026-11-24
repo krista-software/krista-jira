@@ -13,84 +13,47 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.authentication;
 
 import app.krista.extensions.devsecops.development.jira.JiraAttributes;
-import app.krista.extensions.devsecops.development.jira.util.JiraConstants;
+import app.krista.sdk.atlassian.attributes.CredentialFieldNames;
+import app.krista.sdk.atlassian.client.AbstractBasicAuthRestClient;
+import app.krista.sdk.atlassian.error.HttpErrorMapper;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mashape.unirest.http.HttpResponse;
 import com.mashape.unirest.http.JsonNode;
-import com.mashape.unirest.http.Unirest;
-import com.mashape.unirest.http.exceptions.UnirestException;
-import org.glassfish.jersey.client.authentication.HttpAuthenticationFeature;
 
-import javax.ws.rs.client.*;
+import javax.ws.rs.client.Entity;
+import javax.ws.rs.client.Invocation;
+import javax.ws.rs.client.WebTarget;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.File;
 import java.util.List;
 import java.util.Map;
 
-public final class AuthRestClient implements RestClient {
+/**
+ * Basic-auth (account email + API token) Jira REST client. Target creation,
+ * query-parameter expansion, status-code translation and multipart upload are
+ * provided by the shared {@link AbstractBasicAuthRestClient}.
+ */
+public final class AuthRestClient extends AbstractBasicAuthRestClient implements RestClient {
 
-    private final Map<String, Object> attributes;
-    private final boolean invokeAsUser;
-    private final boolean callFromValidateAttributes;
-    private WebTarget webTarget;
+    private static final HttpErrorMapper ERROR_MAPPER = HttpErrorMapper.withDefaults()
+            .message(401, "Admin Auth Token is invalid or expired. Please regenerate your API token from Atlassian account settings (id.atlassian.com → Security → API tokens).")
+            .message(403, "Access denied. The account does not have permission to perform this operation.")
+            .message(404, "Please Provide Valid Host URL")
+            .message(400, "Please Provide Valid Auth Token OR User Name");
 
     public AuthRestClient(Map<String, Object> attributes, boolean invokeAsUser, boolean callFromValidateAttributes) {
-        this.attributes = attributes;
-        this.invokeAsUser = invokeAsUser;
-        this.callFromValidateAttributes = callFromValidateAttributes;
-    }
-
-    private WebTarget getWebTarget(Boolean invokeAsUser) {
-        if ((invokeAsUser != null ? invokeAsUser : this.invokeAsUser) && !callFromValidateAttributes) {
-            throw new IllegalArgumentException("User cannot be authenticated with their own account if client ID and client secret are not provided.");
-        }
-        if (webTarget == null) {
-            HttpAuthenticationFeature
-                    feature = HttpAuthenticationFeature.basic((String) attributes.get(JiraAttributes.USER_NAME),
-                    (String) attributes.get(JiraAttributes.AUTH_TOKEN));
-            Client client = ClientBuilder.newClient();
-            client.register(feature);
-            webTarget
-                    = client.target((String) attributes.get(JiraAttributes.HOST_URL));
-        }
-        return webTarget;
-    }
-
-    @Override
-    public Invocation.Builder getResourceInvoker(String resource, Map<String, Object> queryParams) {
-        WebTarget resourceTarget = getWebTarget(null).path(resource);
-        for (Map.Entry<String, Object> entrySet : queryParams.entrySet()) {
-            resourceTarget = resourceTarget.queryParam(entrySet.getKey(), entrySet.getValue());
-        }
-        return resourceTarget.request(MediaType.APPLICATION_JSON).header("Content-Type", "application/json");
-    }
-
-    public <T> T fetch(String resource, Map<String, Object> queryParams, Class<T> type) {
-        if(resource == null) throw new IllegalArgumentException("resource could not be null");
-        WebTarget resourceTarget = getWebTarget(null).path(resource);
-        for (Map.Entry<String, Object> entrySet : queryParams.entrySet()) {
-            resourceTarget = resourceTarget.queryParam(entrySet.getKey(), entrySet.getValue());
-        }
-        Invocation.Builder requestBuilder = resourceTarget.request(MediaType.APPLICATION_JSON);
-        Response response = requestBuilder.get();
-        T entityType = response.readEntity(type);
-        if (response.getStatusInfo().getFamily().equals(Response.Status.Family.SUCCESSFUL)) {
-            return entityType;
-        } else if (response.getStatus() == 404) {
-            throw new IllegalStateException("Please Provide Valid Host URL");
-        } else if (response.getStatus() == 400) {
-            throw new IllegalStateException("Please Provide Valid Auth Token OR User Name");
-        }
-        throw new IllegalStateException((String) entityType);
-
+        super(attributes,
+                new CredentialFieldNames(JiraAttributes.HOST_URL, JiraAttributes.USER_NAME,
+                        JiraAttributes.AUTH_TOKEN, JiraAttributes.CLIENT_ID, JiraAttributes.CLIENT_SECRET),
+                invokeAsUser, callFromValidateAttributes, ERROR_MAPPER);
     }
 
     /**
@@ -101,7 +64,6 @@ public final class AuthRestClient implements RestClient {
      * @param invokerId denotes invoker information.
      * @return String of JSON which contain metaData of JQL.
      */
-
     @Override
     public String parseAndValidateJQL(String jql, Boolean invokeAsUser, String accountId, String invokerId) {
         WebTarget resourceTarget = getWebTarget(invokeAsUser).path("jql/parse");
@@ -136,9 +98,7 @@ public final class AuthRestClient implements RestClient {
     }
 
     private <T> T fetchIssue(Map<String, Object> queryParams, Class<T> type, WebTarget resourceTarget) {
-        for (Map.Entry<String, Object> entrySet : queryParams.entrySet()) {
-            resourceTarget = resourceTarget.queryParam(entrySet.getKey(), entrySet.getValue());
-        }
+        resourceTarget = applyQueryParams(resourceTarget, queryParams);
         Invocation.Builder invoker = resourceTarget.request(MediaType.APPLICATION_JSON);
         Response response = invoker.get();
         T entityType = response.readEntity(type);
@@ -156,24 +116,8 @@ public final class AuthRestClient implements RestClient {
         if (files == null || files.isEmpty()) {
             throw new IllegalArgumentException("file not found");
         }
-        String callUrl = attributes.get(JiraAttributes.HOST_URL) + "/issue/" + resource + "/attachments";
-        HttpResponse<JsonNode> response;
-        try {
-            response = Unirest.post(callUrl)
-                    .basicAuth((String) attributes.get(JiraAttributes.USER_NAME), (String) attributes.get(JiraAttributes.AUTH_TOKEN))
-                    .header(JiraConstants.ACCEPT, MediaType.APPLICATION_JSON)
-                    .header(JiraConstants.X_ATLASSIAN_TOKEN, JiraConstants.NO_CHECK)
-                    .field("file", files)
-                    .asJson();
-        } catch (UnirestException cause) {
-            throw new IllegalStateException(cause);
-        }
-        return response;
-    }
-
-    @Override
-    public String getJiraAccessToken() {
-        return null;
+        String callUrl = getAttributes().get(JiraAttributes.HOST_URL) + "/issue/" + resource + "/attachments";
+        return uploadMultipart(callUrl, files);
     }
 
 }

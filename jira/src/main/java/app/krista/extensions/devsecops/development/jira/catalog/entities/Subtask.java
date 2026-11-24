@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -31,50 +31,58 @@ import app.krista.extension.impl.anno.*;
         ecosystemId = "catEntryEcosystem_98c365b2-ab5a-463a-ac13-6da05a67c417",
         ecosystemName = "Dev Sec Ops",
         ecosystemVersion = "f376e5a4-a15d-4a3f-b274-cafb36d98bc0")
-@Entity(name = "Subtask", id = "localDomainEntity_a021b0e2-d62c-41c6-83f7-3bdc278fae9c", primaryKey = "Key", supportStore = false)
+@Entity(name = "Subtask", id = "localDomainEntity_a021b0e2-d62c-41c6-83f7-3bdc278fae9c", primaryKey = "Key", supportStore = true, description = "Represents a subtask issue in Jira linked to a parent issue. Belongs to a Ticket Project (via Project Key). Parent Key references the parent issue key (Bug.Bug Key, Story.Story Key, Task.Task Key, or Epic.Epic Key). Related to User (Reporter Name and Assignee Name match User.Display Name). Priority references Ticket Priority.Name. Status references Ticket Status.Name.")
 public class Subtask {
 
-    @Field.Desc(name = "Comments", type = "[ Text ]", required = false)
+    @Field.Desc(name = "Comments", type = "[ Text ]", required = false, description = "List of comments added to the subtask")
     public List<String> comments;
 
     @Searchable
     @ToString
-    @Field(name = "Summary", type = "Text")
+    @Field.Text(name = "Summary", description = "Brief summary of the subtask")
     public String summary;
 
-    @Field(name = "Reporter Name", type = "Text", required = false)
+    @Field.Text(name = "Reporter Name", required = false, description = "Name of the person who reported the subtask. References User.Display Name.")
     public String reporterName;
 
-    @Field(name = "Assignee Name", type = "Text", required = false)
+    @Field.Text(name = "Assignee Name", required = false, description = "Name of the person assigned to the subtask. References User.Display Name.")
     public String assigneeName;
 
-    @Field(name = "Task Type", type = "Text", required = false)
+    @Field.Text(name = "Task Type", required = false, description = "Type classification of the subtask")
     public String taskType;
 
     @Searchable
     @ToString
-    @Field(name = "Key", type = "Text", required = false)
+    @Field.Text(name = "Key", required = false, description = "Unique Jira key identifier for the subtask")
     public String key;
 
-    @Field(name = "Id", type = "Text", required = false)
+    @Field.Text(name = "Id", required = false, description = "Internal Jira identifier for the subtask")
     public String id;
 
-    @Field(name = "Parent Key", type = "Text")
+    @Field.Text(name = "Parent Key", description = "Jira key of the parent issue for this subtask. References Bug.Bug Key, Story.Story Key, Task.Task Key, or Epic.Epic Key.")
     public String parentKey;
 
-    @Field(name = "Project Key", type = "Text")
+    @Field.Text(name = "Project Key", description = "Key of the Jira project this subtask belongs to. References Ticket Project.Key.")
     public String projectKey;
 
-    @Field(name = "Priority", type = "Text", required = false)
+    @Field.Text(name = "Priority", required = false, description = "Priority level of the subtask. References Ticket Priority.Name.")
     public String priority;
 
     @ToString
-    @Field(name = "Status", type = "Text", required = false)
+    @Field.Text(name = "Status", required = false, description = "Current workflow status of the subtask. References Ticket Status.Name.")
     public String status;
 
     @Searchable
     @Field(name = "Description", type = "RichText")
     public String description;
+
+    @Searchable
+    @Field.Date(name = "Created Date", required = false, includeTimeOfDay = true, allowPast = true, allowToday = true, allowFuture = true, description = "Date and time when the subtask was created", attributes = {@Attribute(name = "visualWidth", value = "S"), @Attribute(name = "dateFormat", value = "'MMM DD, yyyy h:mm:ss a'")}, options = {})
+    public Long createdDate;
+
+    @Searchable
+    @Field.Date(name = "Last Modified Date", required = false, includeTimeOfDay = true, allowPast = true, allowToday = true, allowFuture = true, description = "Date and time when the subtask was last modified", attributes = {@Attribute(name = "visualWidth", value = "S"), @Attribute(name = "dateFormat", value = "'MMM DD, yyyy h:mm:ss a'")}, options = {})
+    public Long lastModifiedDate;
 
     public Map<String, Object> toFields() {
         Subtask subtask = this;
@@ -91,6 +99,8 @@ public class Subtask {
         fieldMap.put("Priority", subtask.priority);
         fieldMap.put("Status", subtask.status);
         fieldMap.put("Description", subtask.description);
+        fieldMap.put("Created Date", subtask.createdDate);
+        fieldMap.put("Last Modified Date", subtask.lastModifiedDate);
         return fieldMap;
     }
 }

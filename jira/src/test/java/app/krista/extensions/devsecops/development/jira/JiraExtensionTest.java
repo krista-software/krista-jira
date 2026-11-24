@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira;
@@ -63,11 +63,17 @@ class JiraExtensionTest {
         // Act
         Map<String, String> result = jiraExtension.customTabs();
 
-        // Assert
+        // Assert — SDK refactor added Authentication, Jira Audit, and AI Assistant tabs
         assertNotNull(result);
-        assertEquals(1, result.size());
+        assertEquals(4, result.size());
         assertTrue(result.containsKey("Documentation"));
         assertEquals("static/docs", result.get("Documentation"));
+        assertTrue(result.containsKey("Authentication"));
+        assertEquals("jiraextn/sdk/auth/", result.get("Authentication"));
+        assertTrue(result.containsKey("Jira Audit"));
+        assertEquals("jiraextn/sdk/audit/", result.get("Jira Audit"));
+        assertTrue(result.containsKey("AI Assistant"));
+        assertEquals("jiraextn/mcp-setup", result.get("AI Assistant"));
     }
 
     @Test

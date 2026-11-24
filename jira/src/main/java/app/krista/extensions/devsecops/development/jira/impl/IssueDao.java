@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.impl;
@@ -31,7 +31,7 @@ import app.krista.extensions.devsecops.development.jira.catalog.validators.Valid
 import app.krista.extensions.devsecops.development.jira.services.HtmlToAdfConverter;
 import app.krista.extensions.devsecops.development.jira.services.JiraIssue;
 import app.krista.extensions.devsecops.development.jira.services.JiraUser;
-import app.krista.extensions.devsecops.development.jira.util.DatePlus;
+import app.krista.sdk.atlassian.util.DatePlus;
 import app.krista.extensions.devsecops.development.jira.util.JiraConstants;
 import app.krista.model.base.FreeForm;
 import com.google.gson.JsonArray;
@@ -90,6 +90,10 @@ public final class IssueDao {
         this.ticketInfoDao = new TicketInfoDao(restClientFactory, restClient);
     }
 
+    public UserDao getUserDao() {
+        return userDao;
+    }
+
     private static JsonObject getPriorityJsonObject(TicketPriority priority) {
         JsonObject priorityObj = new JsonObject();
         if (priority.id != null) {
@@ -121,13 +125,13 @@ public final class IssueDao {
         try {
             Map<String, Object> queryParams = new HashMap<>();
             queryParams.put("query", email);
-            String out = restClient.fetch("user/search", queryParams, String.class);
+            String out = getRestClient(null).fetch("user/search", queryParams, String.class);
             JsonArray jsonArray = GSON.fromJson(out, JsonArray.class);
             if (!jsonArray.isEmpty()) {
                 JsonObject jsonObject = jsonArray.get(0).getAsJsonObject();
                 return jsonObject.get("accountId").getAsString();
             } else {
-                System.err.println("No user found with email " + email);
+                logger.warn("No user found with email {}", email);
                 return "No user found with email " + email;
             }
         } catch (IllegalCallerException cause) {
@@ -150,7 +154,7 @@ public final class IssueDao {
             userMap.put("Display Name", responseBody.get("displayName").getAsString());
             return userMap;
         } else {
-            System.out.println("Failed to create user");
+            logger.warn("Failed to create user");
             return Map.of();
         }
     }
@@ -158,7 +162,7 @@ public final class IssueDao {
     public List<String> getUserGroups(String userKey) {
         Map<String, Object> queryParams = new HashMap<>();
         queryParams.put("accountId", userKey);
-        String out = restClient.fetch("user/groups", queryParams, String.class);
+        String out = getRestClient(null).fetch("user/groups", queryParams, String.class);
         if (!out.isEmpty()) {
             JsonObject responseBody = GSON.fromJson(out, JsonObject.class);
             JsonArray groupsArray = responseBody.getAsJsonArray("values");
@@ -202,7 +206,94 @@ public final class IssueDao {
     }
 
     public Issue createIssue(String projectKey, String summary, String description, String parentKey, String issueType) {
+        return createIssue(projectKey, summary, description, parentKey, issueType, null, null);
+    }
+
+    public Issue createIssue(String projectKey, String summary, String description, String parentKey, String issueType, String reporterAccountId) {
+        return createIssue(projectKey, summary, description, parentKey, issueType, reporterAccountId, null);
+    }
+
+    public Issue createIssue(String projectKey, String summary, String description, String parentKey, String issueType,
+                             String reporterAccountId, Map<String, Object> customFields) {
+        boolean hasReporter = reporterAccountId != null && !reporterAccountId.isBlank();
+
+        // Build fields WITHOUT reporter first — reporter is set via a separate PUT after creation
+        // because many Jira projects don't have the Reporter field on the Create Issue screen
+        JsonObject fields = buildCreateIssueFields(projectKey, summary, description, parentKey, issueType);
+        // Populate custom fields (e.g. a required "Category") using the project's CREATE
+        // metadata — same name→id/type resolution used by updateIssue, so text, multi-value,
+        // option and date custom fields all work on create too. Optional: skipped when absent.
+        if (customFields != null && !customFields.isEmpty()) {
+            applyCustomFields(customFields, fields, getCreateFieldsMetaData(projectKey, issueType));
+        }
+        JsonObject data = new JsonObject();
+        data.add("fields", fields);
+
         Invocation.Builder invoker = getRestClient().getResourceInvoker("issue", new HashMap<>());
+        Response response = invoker.post(Entity.entity(data.toString(), MediaType.APPLICATION_JSON));
+        String jsonResponse = response.readEntity(String.class);
+
+        // On a non-2xx, surface Jira's own field-level errors as a clear message instead of a
+        // vague null/NPE — Jira is the authority on which values/fields are valid.
+        if (!response.getStatusInfo().getFamily().equals(Response.Status.Family.SUCCESSFUL)) {
+            String detail = extractJiraErrors(jsonResponse);
+            logger.warn("createIssue: Jira rejected create (HTTP {}) — {}", response.getStatus(), detail);
+            throw new IllegalArgumentException("Jira rejected the create: " + detail);
+        }
+
+        JsonObject jsonObject = GSON.fromJson(jsonResponse, JsonObject.class);
+        try {
+            String key = jsonObject.get("key").getAsString();
+            // Set reporter after creation via PUT (bypasses create-screen restriction)
+            if (hasReporter) {
+                updateReporter(key, reporterAccountId);
+            }
+            return getIssueFinal(key);
+        } catch (Exception cause) {
+            throw new IllegalArgumentException("Unexpected create response: " + jsonResponse, cause);
+        }
+    }
+
+    /** Flattens Jira's {@code {errorMessages:[...], errors:{field:msg}}} into a readable string. */
+    private static String extractJiraErrors(String jsonResponse) {
+        try {
+            JsonObject o = GSON.fromJson(jsonResponse, JsonObject.class);
+            List<String> parts = new ArrayList<>();
+            if (o.has("errorMessages")) {
+                for (JsonElement e : o.getAsJsonArray("errorMessages")) {
+                    parts.add(e.getAsString());
+                }
+            }
+            if (o.has("errors") && o.get("errors").isJsonObject()) {
+                for (Map.Entry<String, JsonElement> e : o.getAsJsonObject("errors").entrySet()) {
+                    parts.add(e.getKey() + ": " + e.getValue().getAsString());
+                }
+            }
+            return parts.isEmpty() ? jsonResponse : String.join("; ", parts);
+        } catch (RuntimeException ignore) {
+            return jsonResponse;
+        }
+    }
+
+    private void updateReporter(String issueKey, String reporterAccountId) {
+        try {
+            Invocation.Builder invoker = getRestClient().getResourceInvoker("issue/" + issueKey, new HashMap<>());
+            JsonObject reporter = new JsonObject();
+            reporter.addProperty("accountId", reporterAccountId);
+            JsonObject fields = new JsonObject();
+            fields.add("reporter", reporter);
+            JsonObject body = new JsonObject();
+            body.add("fields", fields);
+            Response response = invoker.put(Entity.entity(body.toString(), MediaType.APPLICATION_JSON));
+            if (!response.getStatusInfo().getFamily().equals(Response.Status.Family.SUCCESSFUL)) {
+                logger.warn("Could not set reporter for issue {}: {}", issueKey, response.readEntity(String.class));
+            }
+        } catch (Exception cause) {
+            logger.warn("Failed to set reporter for issue {}: {}", issueKey, cause.getMessage());
+        }
+    }
+
+    private JsonObject buildCreateIssueFields(String projectKey, String summary, String description, String parentKey, String issueType) {
         JsonObject fields = new JsonObject();
         JsonObject project = new JsonObject();
         JsonObject issueTypeMap = new JsonObject();
@@ -220,18 +311,7 @@ public final class IssueDao {
         if (issueType.equalsIgnoreCase("Epic") && findProjectStyle(projectKey).equalsIgnoreCase("classic")) {
             fields.addProperty("customfield_10011", description);
         }
-        JsonObject data = new JsonObject();
-        data.add("fields", fields);
-        Response response;
-        response = invoker.post(Entity.entity(data.toString(), MediaType.APPLICATION_JSON));
-        String jsonResponse = response.readEntity(String.class);
-        JsonObject jsonObject = GSON.fromJson(jsonResponse, JsonObject.class);
-        try {
-            String key = jsonObject.get("key").getAsString();
-            return getIssueFinal(key);
-        } catch (Exception cause) {
-            throw new IllegalArgumentException(jsonResponse);
-        }
+        return fields;
     }
 
     private String findProjectStyle(String projectKey) {
@@ -313,25 +393,46 @@ public final class IssueDao {
     }
 
 
+    private static final HtmlToAdfConverter HTML_TO_ADF_CONVERTER = new HtmlToAdfConverter();
+
     private JsonObject getAtlassianDoc(String description) {
-        HtmlToAdfConverter converter = new HtmlToAdfConverter();
-        return converter.convert(description);
+        return HTML_TO_ADF_CONVERTER.convert(description);
     }
 
     public List<Issue> searchByJQL(String jql, long size, long page) {
-        Map<String, Object> qparams = new HashMap<>();
-        qparams.put("jql", jql);
-        qparams.put("fields", "*all");
-        qparams.put("startAt", Math.max((page - 1) * size, 0));
-        qparams.put("maxResults", size == 0 ? 20 : size);
-        String out = restClient.fetch("search/jql", qparams, String.class);
-        JsonObject jsonObject = GSON.fromJson(out, JsonObject.class);
-        if (jsonObject.has(ISSUES)) {
-            JsonArray issues = (JsonArray) jsonObject.get(ISSUES);
-            return getIssues(issues);
-        } else {
-            throw new RuntimeException(jsonObject.has(ERROR_MESSAGES) ? (jsonObject.get(ERROR_MESSAGES)).getAsJsonArray().get(0).getAsString() : ISSUES_NOT_FOUND);
+        long effectiveSize = size == 0 ? 20 : size;
+        long targetPage = Math.max(page, 1);
+        String nextPageToken = null;
+
+        for (long currentPage = 1; currentPage <= targetPage; currentPage++) {
+            Map<String, Object> qparams = prepareQueryparam(jql, effectiveSize, nextPageToken);
+            String out = getRestClient(null).fetch("search/jql", qparams, String.class);
+            JsonObject jsonObject = GSON.fromJson(out, JsonObject.class);
+
+            if (jsonObject.has(ISSUES)) {
+                JsonArray issues = (JsonArray) jsonObject.get(ISSUES);
+
+                if (currentPage == targetPage) {
+                    return getIssues(issues);
+                }
+
+                // Not at target page yet — advance cursor
+                nextPageToken = jsonObject.has("nextPageToken")
+                        ? jsonObject.get("nextPageToken").getAsString() : null;
+                boolean isLast = jsonObject.has("isLast")
+                        && jsonObject.get("isLast").getAsBoolean();
+
+                if (isLast || nextPageToken == null) {
+                    return new ArrayList<>();
+                }
+            } else {
+                throw new RuntimeException(jsonObject.has(ERROR_MESSAGES)
+                        ? (jsonObject.get(ERROR_MESSAGES)).getAsJsonArray().get(0).getAsString()
+                        : ISSUES_NOT_FOUND);
+            }
         }
+
+        return new ArrayList<>();
     }
 
     public List<Issue> searchByJqlQuery(boolean invokeAsUser, String accountId, String invokerId, String jql, long size) {
@@ -464,82 +565,303 @@ public final class IssueDao {
     }
 
     private void updateCustomFieldToFields(FreeForm customFields, JsonObject fields, String issueKey) {
-        JsonObject fieldsEditMetaData = getJiraFieldsData(issueKey);
+        applyCustomFields(customFields, fields, getJiraFieldsData(issueKey));
+    }
 
+    /**
+     * Resolves each custom field NAME to its Jira field id + type (from the supplied field
+     * metadata) and writes the correctly-shaped value into {@code fields}. Shared by update
+     * (edit metadata) and create (create metadata).
+     */
+    private void applyCustomFields(Map<String, Object> customFields, JsonObject fields, JsonObject fieldsMetaData) {
+        List<String> availableNames = new ArrayList<>();
+        for (String fieldId : fieldsMetaData.keySet()) {
+            JsonObject fm = fieldsMetaData.getAsJsonObject(fieldId);
+            if (fm.has("name")) {
+                availableNames.add(fm.get("name").getAsString());
+            }
+        }
+        logger.info("applyCustomFields: provided={} availableFields={}", customFields.keySet(), availableNames);
         for (String customFieldName : customFields.keySet()) {
-            updateCustomFieldByType(customFields, fields, fieldsEditMetaData, customFieldName);
+            boolean matched = updateCustomFieldByType(customFields, fields, fieldsMetaData, customFieldName);
+            if (!matched) {
+                logger.warn("applyCustomFields: field '{}' NOT found on the screen — check the exact name/case. "
+                        + "Available fields: {}", customFieldName, availableNames);
+            }
         }
     }
 
-    private void updateCustomFieldByType(FreeForm customFields, JsonObject fields, JsonObject fieldsEditMetaData, String customFieldName) {
+    /**
+     * Create-screen field metadata (id → {name, schema, allowedValues}) for a project +
+     * issue type, from {@code issue/createmeta}. Same shape as {@link #getJiraFieldsData}
+     * (edit metadata), so the custom-field resolver is reused verbatim.
+     */
+    /**
+     * Names of fields the project marks REQUIRED on the create screen for this issue type,
+     * excluding the ones this request already sets itself (project, issue type, summary,
+     * description, reporter). Used to tell the caller exactly which extra fields they must
+     * supply in "Custom Fields" — a project can require several.
+     */
+    public List<String> getRequiredCustomFieldNames(String projectKey, String issueType) {
+        JsonObject meta = getCreateFieldsMetaData(projectKey, issueType);
+        Set<String> alreadyHandled = Set.of("project", "issuetype", "summary", "description", "reporter");
+        List<String> required = new ArrayList<>();
+        for (String fieldId : meta.keySet()) {
+            if (alreadyHandled.contains(fieldId)) {
+                continue;
+            }
+            JsonObject fm = meta.getAsJsonObject(fieldId);
+            if (fm.has("required") && fm.get("required").getAsBoolean() && fm.has("name")) {
+                required.add(fm.get("name").getAsString());
+            }
+        }
+        logger.info("requiredFields: project={} issueType={} required={}", projectKey, issueType, required);
+        return required;
+    }
+
+    /** Required field names (see {@link #getRequiredCustomFieldNames}) not present in {@code provided}. */
+    public List<String> getMissingRequiredCustomFields(String projectKey, String issueType, Map<String, Object> provided) {
+        List<String> missing = new ArrayList<>();
+        for (String requiredName : getRequiredCustomFieldNames(projectKey, issueType)) {
+            boolean supplied = provided != null && provided.keySet().stream()
+                    .anyMatch(k -> k.equalsIgnoreCase(requiredName));
+            if (!supplied) {
+                missing.add(requiredName);
+            }
+        }
+        return missing;
+    }
+
+    /**
+     * Validates the custom fields for a create, in ONE create-meta fetch, returning a list of
+     * human-readable problems (empty = OK):
+     * <ul>
+     *   <li>a required field (beyond the ones this request sets itself) was not supplied,</li>
+     *   <li>a supplied field name doesn't exist on the create screen,</li>
+     *   <li>a supplied value isn't one of a select field's allowed values (lists the allowed set).</li>
+     * </ul>
+     */
+    public List<String> validateCustomFieldsForCreate(String projectKey, String issueType, Map<String, Object> provided) {
+        List<String> problems = new ArrayList<>();
+        JsonObject meta = getCreateFieldsMetaData(projectKey, issueType);
+        if (meta.size() == 0) {
+            // Couldn't read create metadata — do NOT pre-validate (avoids false "missing/unknown"
+            // blocks); let Jira validate at create time and surface its own clear error.
+            logger.warn("validateCustomFieldsForCreate: no create metadata for {}/{} — deferring validation to Jira",
+                    projectKey, issueType);
+            return problems;
+        }
+        Set<String> handled = Set.of("project", "issuetype", "summary", "description", "reporter");
+
+        // Index non-standard fields by (lower-cased) display name; collect available names.
+        Map<String, JsonObject> byName = new LinkedHashMap<>();
+        List<String> availableNames = new ArrayList<>();
+        for (String fieldId : meta.keySet()) {
+            if (handled.contains(fieldId)) {
+                continue;
+            }
+            JsonObject fm = meta.getAsJsonObject(fieldId);
+            if (fm.has("name")) {
+                byName.put(fm.get("name").getAsString().toLowerCase(), fm);
+                availableNames.add(fm.get("name").getAsString());
+            }
+        }
+
+        // 1) Required fields not supplied.
+        for (JsonObject fm : byName.values()) {
+            if (fm.has("required") && fm.get("required").getAsBoolean()) {
+                String name = fm.get("name").getAsString();
+                boolean supplied = provided != null && provided.keySet().stream()
+                        .anyMatch(k -> k.equalsIgnoreCase(name));
+                if (!supplied) {
+                    problems.add("Missing required field '" + name + "'.");
+                }
+            }
+        }
+
+        // 2) Supplied fields that don't exist on the create screen (name typo). We do NOT
+        //    validate option VALUES against create-meta allowedValues — that list is often
+        //    incomplete (e.g. Category's "Other" is valid but absent from allowedValues), so
+        //    checking against it produces false rejections. Jira is the authority on values;
+        //    an invalid value comes back as a clear Jira error at create time.
+        if (provided != null) {
+            for (String providedName : provided.keySet()) {
+                if (!byName.containsKey(providedName.toLowerCase())) {
+                    problems.add("Field '" + providedName + "' does not exist on the create screen. Available fields: "
+                            + availableNames + ".");
+                }
+            }
+        }
+        return problems;
+    }
+
+    /**
+     * Create-screen field metadata (fieldId → {name, required, schema, allowedValues}) for a
+     * project + issue type, via the PROJECT-SCOPED endpoint
+     * {@code issue/createmeta/{projectKey}/issuetypes/{issueTypeId}}.
+     *
+     * <p>The deprecated classic {@code issue/createmeta?projectKeys=} endpoint <b>ignores</b>
+     * the project filter and returns the first accessible project's fields — which made the
+     * extension read the WRONG project's required fields (e.g. reporting DIR's "Category" as
+     * required for a KE issue). The path-scoped endpoint cannot return the wrong project.</p>
+     */
+    JsonObject getCreateFieldsMetaData(String projectKey, String issueType) {
+        JsonObject byId = new JsonObject();
+        try {
+            String issueTypeId = getIssuesTypeId(projectKey, issueType);   // project-scoped, reliable
+            int startAt = 0;
+            while (true) {
+                Map<String, Object> q = new HashMap<>();
+                q.put("startAt", startAt);
+                q.put("maxResults", 100);
+                String res = getRestClient().fetch(
+                        "issue/createmeta/" + projectKey + "/issuetypes/" + issueTypeId, q, String.class);
+                JsonObject page = GSON.fromJson(res, JsonObject.class);
+                JsonArray fields = page.has("fields") ? page.getAsJsonArray("fields")
+                        : page.getAsJsonArray("values");
+                if (fields == null || fields.isEmpty()) {
+                    break;
+                }
+                for (JsonElement e : fields) {
+                    JsonObject f = e.getAsJsonObject();
+                    String fid = f.has("fieldId") ? f.get("fieldId").getAsString()
+                            : (f.has("key") ? f.get("key").getAsString() : null);
+                    if (fid != null) {
+                        byId.add(fid, f);
+                    }
+                }
+                boolean isLast = !page.has("isLast") || page.get("isLast").getAsBoolean();
+                startAt += fields.size();
+                if (isLast) {
+                    break;
+                }
+            }
+        } catch (RuntimeException ex) {
+            logger.warn("getCreateFieldsMetaData: could not fetch create metadata for {}/{} — {}",
+                    projectKey, issueType, ex.getMessage());
+        }
+        logger.info("getCreateFieldsMetaData: {}/{} -> {} field(s)", projectKey, issueType, byId.size());
+        return byId;
+    }
+
+    /**
+     * Resolves {@code customFieldName} (case-insensitive) against the field metadata and,
+     * when matched, writes the correctly-typed value into {@code fields}.
+     *
+     * @return {@code true} if a field with that name was found (whether or not a value was
+     *         set), {@code false} if no field matched — so the caller can warn.
+     */
+    private boolean updateCustomFieldByType(Map<String, Object> customFields, JsonObject fields, JsonObject fieldsEditMetaData, String customFieldName) {
         for (String fieldId : fieldsEditMetaData.keySet()) {
             JsonObject fieldMetaData = fieldsEditMetaData.getAsJsonObject(fieldId);
+            if (!fieldMetaData.has("name") || !fieldMetaData.has("schema")) {
+                continue;
+            }
             String name = fieldMetaData.get("name").getAsString();
             String optionId;
 
-            if (customFieldName.equals(name)) {
+            if (customFieldName.equalsIgnoreCase(name)) {
                 Object updatedFieldValue = customFields.get(customFieldName);
                 String fieldType = getFieldType(fieldMetaData.getAsJsonObject("schema"));
+                logger.info("customField: matched name='{}' -> id={} type={} value={}",
+                        name, fieldId, fieldType, updatedFieldValue);
+                if (updatedFieldValue == null) {
+                    logger.warn("customField: name='{}' (id={}) has no value — nothing set", name, fieldId);
+                    return true;
+                }
 
                 switch (fieldType) {
                     case "date":
                         if (updatedFieldValue instanceof Number) {
-                            updateDate(fields, fieldId, updatedFieldValue);
+                            updateDate(fields, fieldId, updatedFieldValue);   // epoch millis
+                        } else {
+                            // Text value from the catalog input — Jira accepts a "yyyy-MM-dd"
+                            // date string directly (this is how e.g. KE's required Due date is set).
+                            fields.addProperty(fieldId, updatedFieldValue.toString());
                         }
+                        break;
+                    case "datetime":
+                        // ISO 8601 string, passed through (e.g. 2026-09-01T00:00:00.000+0000).
+                        fields.addProperty(fieldId, updatedFieldValue.toString());
                         break;
                     case "string":
                         fields.addProperty(fieldId, updatedFieldValue.toString());
                         break;
                     case "option":
-                        optionId = findOptionIdByName(fieldMetaData.getAsJsonArray("allowedValues"), updatedFieldValue.toString());
-                        if (optionId != null) {
-                            JsonObject optionObject = new JsonObject();
-                            optionObject.addProperty("id", optionId);
-                            fields.add(fieldId, optionObject);
-                        }
+                        // Reference by id when create-meta lists the option, otherwise by
+                        // value — create-meta allowedValues is often incomplete (e.g. Category's
+                        // "Other"), and Jira accepts a valid option given by "value".
+                        fields.add(fieldId, optionRef(fieldMetaData.getAsJsonArray("allowedValues"),
+                                updatedFieldValue.toString()));
                         break;
                     case "array":
                         JsonArray arrayValue = new JsonArray();
-
                         String itemsType = fieldMetaData.getAsJsonObject("schema").get("items").getAsString();
-                        if (!Objects.equals(itemsType, "string")) {
-                            if (updatedFieldValue instanceof List<?>) {
-                                for (Object value : (List<?>) updatedFieldValue) {
-                                    if (value instanceof String) {
-                                        optionId = findOptionIdByName(fieldMetaData.getAsJsonArray("allowedValues"), (String) value);
-                                        if (optionId != null) {
-                                            JsonObject optionObject = new JsonObject();
-                                            optionObject.addProperty("id", optionId);
-                                            arrayValue.add(optionObject);
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            if (updatedFieldValue instanceof List<?>) {
-                                for (Object value : (List<?>) updatedFieldValue) {
-                                    if (value instanceof String) {
-                                        arrayValue.add((String) value);
-                                    }
-                                }
+                        // Accept a single value or a list.
+                        for (String item : valuesOf(updatedFieldValue)) {
+                            if ("string".equals(itemsType)) {
+                                arrayValue.add(item);
+                            } else {
+                                arrayValue.add(optionRef(fieldMetaData.getAsJsonArray("allowedValues"), item));
                             }
                         }
-
                         fields.add(fieldId, arrayValue);
                         break;
                     default:
+                        logger.warn("customField: name='{}' (id={}) has unsupported type '{}' — not set",
+                                name, fieldId, fieldType);
                         break;
                 }
+                return true;
             }
         }
+        return false;
+    }
+
+    /**
+     * Builds an option reference for a select field: {@code {"id": ...}} when the value is
+     * found in create-meta's allowedValues, otherwise {@code {"value": ...}} so Jira resolves
+     * it (allowedValues is frequently incomplete).
+     */
+    private JsonObject optionRef(JsonArray allowedValues, String value) {
+        JsonObject ref = new JsonObject();
+        String id = findOptionIdByName(allowedValues, value);
+        if (id != null) {
+            ref.addProperty("id", id);
+        } else {
+            ref.addProperty("value", value);
+        }
+        return ref;
+    }
+
+    /** A field value as a list of strings — single value or a list both supported. */
+    private static List<String> valuesOf(Object value) {
+        List<String> out = new ArrayList<>();
+        if (value instanceof List<?> list) {
+            for (Object o : list) {
+                if (o != null) {
+                    out.add(o.toString());
+                }
+            }
+        } else if (value != null) {
+            out.add(value.toString());
+        }
+        return out;
     }
 
     private String findOptionIdByName(JsonArray allowedValues, String optionValue) {
+        if (allowedValues == null) {
+            // Field has no allowed-values list in metadata (or it wasn't expanded) — nothing
+            // to resolve. Guard avoids a null-message NPE iterating a null array.
+            logger.warn("findOptionIdByName: no allowedValues for value='{}' — cannot resolve option id", optionValue);
+            return null;
+        }
         for (JsonElement element : allowedValues) {
             JsonObject option = element.getAsJsonObject();
-            JsonElement valueElement = option.get("value");
+            // Options can be labelled 'value' (select) or 'name' (e.g. components/versions).
+            JsonElement valueElement = option.has("value") ? option.get("value") : option.get("name");
 
-            if (valueElement != null && optionValue.equals(valueElement.getAsString())) {
+            if (valueElement != null && optionValue.equalsIgnoreCase(valueElement.getAsString())) {
                 return option.get("id").getAsString();
             }
         }
@@ -808,10 +1130,10 @@ public final class IssueDao {
                 throw new RuntimeException(response.readEntity(String.class));
             }
         } catch (Exception cause) {
-            System.out.println("Did not complete request");
+            logger.warn("Did not complete request");
             throw cause;
         } finally {
-            System.out.println("Assign Child Issue to Epic finished");
+            logger.info("Assign Child Issue to Epic finished");
         }
     }
 

@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.extresp;
@@ -31,4 +31,5 @@ public class JiraResources {
     public static final String PARENT_EPIC_KEY = "Parent Epic Key";
     public static final String SUMMARY = "Summary";
     public static final String DESCRIPTION = "Description";
+    public static final String REPORTER_ACCOUNT_ID = "Reporter Account Id";
 }

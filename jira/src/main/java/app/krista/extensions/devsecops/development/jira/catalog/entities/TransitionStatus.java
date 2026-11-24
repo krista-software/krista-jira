@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -25,24 +25,24 @@ import app.krista.extension.impl.anno.*;
         ecosystemId = "catEntryEcosystem_98c365b2-ab5a-463a-ac13-6da05a67c417",
         ecosystemName = "Dev Sec Ops",
         ecosystemVersion ="7339e9c9-76fd-4b24-bf95-4c5fdc3cef85")
-@Entity(name = "Transition Status", id = "localDomainEntity_42cd1d52-47ec-4f3e-bdbf-182afcd853ab", primaryKey = "From Id", supportStore = false)
+@Entity(name = "Transition Status", id = "localDomainEntity_42cd1d52-47ec-4f3e-bdbf-182afcd853ab", primaryKey = "From Id", supportStore = true, description = "Represents a workflow transition between statuses in Jira. From Name and To Name reference Ticket Status.Name.")
 public class TransitionStatus {
 
-    @Field(name = "From Id", type = "Text")
+    @Field.Text(name = "From Id", description = "Identifier of the source status")
     public String fromId;
 
     @ToString
-    @Field(name = "From Name", type = "Text")
+    @Field.Text(name = "From Name", description = "Name of the source status. References Ticket Status.Name.")
     public String fromName;
 
-    @Field(name = "To Id", type = "Text")
+    @Field.Text(name = "To Id", description = "Identifier of the target status")
     public String toId;
 
     @ToString
-    @Field(name = "To Name", type = "Text")
+    @Field.Text(name = "To Name", description = "Name of the target status. References Ticket Status.Name.")
     public String toName;
 
-    @Field(name = "To Category Name", type = "Text")
+    @Field.Text(name = "To Category Name", description = "Category name of the target status")
     public String toCategoryName;
 
 }

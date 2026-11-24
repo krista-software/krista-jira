@@ -56,6 +56,14 @@ java {
     targetCompatibility = JavaVersion.VERSION_21
 }
 
+// Two SLF4J bindings (log4j-slf4j-impl + slf4j-simple, pulled transitively via
+// common-jaxrs) make logging non-deterministic and cause log4j2.xml to be ignored when
+// slf4j-simple wins. Keep log4j2 as the single binding so log4j2.xml (and its per-package
+// levels) are actually honored.
+configurations.all {
+    exclude group: 'org.slf4j', module: 'slf4j-simple'
+}
+
 repositories {
     mavenLocal()
     maven {
@@ -103,9 +111,12 @@ publishing {
 // Second configurations block removed - not needed in newer Gradle versions
 
 dependencies {
-    annotationProcessor 'app.krista:extension-impl-anno-processors:1.0.118'
+    // Shared Atlassian SDK — from mavenLocal (user-level vs app-wide token key fix).
+    implementation 'app.krista.sdk:krista-atlassian-sdk:1.0.5'
 
-    implementation 'app.krista:krista-apis:1.0.118'
+    annotationProcessor 'app.krista:extension-impl-anno-processors:1.0.125-sp1'
+
+    implementation 'app.krista:krista-apis:1.0.125-sp1'
     implementation 'org.glassfish.hk2:hk2-api:3.0.3'
     implementation 'org.glassfish.jersey.media:jersey-media-multipart:2.35'
     implementation 'com.github.scribejava:scribejava-apis:8.3.3'
@@ -115,6 +126,7 @@ dependencies {
     implementation 'org.apache.poi:poi-ooxml:5.2.3'
     implementation 'commons-validator:commons-validator:1.7'
 
+    testImplementation 'com.google.code.gson:gson:2.10.1'
     testImplementation 'com.kristasoft.common:common-test:1.0.45'
     testImplementation 'org.glassfish.jersey.inject:jersey-hk2:3.0.3'
 
@@ -128,6 +140,30 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
     testImplementation 'org.junit.vintage:junit-vintage-engine:5.9.2'
     testImplementation 'org.junit.platform:junit-platform-launcher:1.9.2'
+}
+
+// ── Auth & audit UI: extract pre-built HTML from the published Atlassian SDK JAR ──
+// The SDK's buildUI task inlines styles.css/app.js into auth/index.html and
+// audit/index.html; copy them into this module's runtime resources so
+// JiraAuthUiResource / JiraAuditResource can serve them from the classpath.
+configurations {
+    sdkUi { canBeResolved = true; transitive = false }
+}
+dependencies {
+    sdkUi 'app.krista.sdk:krista-atlassian-sdk:1.0.5'
+}
+tasks.register('extractSDKResources', Copy) {
+    mustRunAfter tasks.named('processResources')
+    from(zipTree(configurations.sdkUi.singleFile)) {
+        include 'auth/index.html'
+        include 'audit/index.html'
+        include 'mcp-setup/index.html'
+    }
+    into("${project.buildDir}/resources/main")
+    includeEmptyDirs = false
+}
+tasks.named('classes') {
+    dependsOn 'extractSDKResources'
 }
 
 tasks.register('createSourceDir', Exec) {

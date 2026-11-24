@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -31,47 +31,58 @@ import app.krista.extension.impl.anno.*;
         ecosystemId = "catEntryEcosystem_98c365b2-ab5a-463a-ac13-6da05a67c417",
         ecosystemName = "Dev Sec Ops",
         ecosystemVersion ="33aa9347-d825-447c-be08-a2b02f8af859")
-@Entity(name = "Story", id = "localDomainEntity_5faf6082-c1d7-4cfa-b23b-d23ce2a22877", primaryKey = "Story Key", supportStore = false)
+@Entity(name = "Story", id = "localDomainEntity_5faf6082-c1d7-4cfa-b23b-d23ce2a22877", primaryKey = "Story Key", supportStore = true, description = "Represents a user story issue in Jira. Belongs to a Ticket Project (via Project Key). Parent Key references the parent issue (typically Epic.Epic Key). Related to User (Reporter Name and Assignee Name match User.Display Name). Priority references Ticket Priority.Name. Status references Ticket Status.Name. May have Subtasks where Subtask.Parent Key matches Story Key.")
 public class Story {
 
     @Searchable
     @ToString
-    @Field(name = "Summary", type = "Text", required = false)
+    @Field.Text(name = "Summary", description = "Brief summary of the story", required = false)
     public String summary;
 
-    @Field.Desc(name = "Comments", type = "[ Text ]", required = false)
+    @Field.Desc(name = "Comments", type = "[ Text ]", required = false, description = "List of comments added to the story")
     public List<String> comments;
 
-    @Field(name = "Reporter Name", type = "Text", required = false)
+    @Field.Text(name = "Reporter Name", description = "Name of the person who reported the story. References User.Display Name.", required = false)
     public String reporterName;
 
-    @Field(name = "Assignee Name", type = "Text", required = false)
+    @Field.Text(name = "Assignee Name", description = "Name of the person assigned to the story. References User.Display Name.", required = false)
     public String assigneeName;
 
-    @Field(name = "Story Type", type = "Text", required = false)
+    @Field.Text(name = "Story Type", description = "Type classification of the story", required = false)
     public String storyType;
 
     @Searchable
     @ToString
-    @Field(name = "Story Key", type = "Text", required = false)
+    @Field.Text(name = "Story Key", description = "Unique Jira key identifier for the story. Referenced by Subtask.Parent Key for parent-child relationships.", required = false)
     public String storyKey;
 
-    @Field(name = "Id", type = "Text", required = false)
+    @Field.Text(name = "Id", description = "Internal Jira identifier for the story", required = false)
     public String id;
 
-    @Field(name = "Project Key", type = "Text")
+    @Field.Text(name = "Parent Key", description = "Jira key of the parent issue (typically an Epic). References Epic.Epic Key.", required = false)
+    public String parentKey;
+
+    @Field.Text(name = "Project Key", description = "Key of the Jira project this story belongs to. References Ticket Project.Key.")
     public String projectKey;
 
-    @Field(name = "Priority", type = "Text", required = false)
+    @Field.Text(name = "Priority", description = "Priority level of the story. References Ticket Priority.Name.", required = false)
     public String priority;
 
     @ToString
-    @Field(name = "Status", type = "Text", required = false)
+    @Field.Text(name = "Status", description = "Current workflow status of the story. References Ticket Status.Name.", required = false)
     public String status;
 
     @Searchable
     @Field(name = "Description", type = "RichText")
     public String description;
+
+    @Searchable
+    @Field.Date(name = "Created Date", required = false, includeTimeOfDay = true, allowPast = true, allowToday = true, allowFuture = true, description = "Date and time when the story was created", attributes = {@Attribute(name = "visualWidth", value = "S"), @Attribute(name = "dateFormat", value = "'MMM DD, yyyy h:mm:ss a'")}, options = {})
+    public Long createdDate;
+
+    @Searchable
+    @Field.Date(name = "Last Modified Date", required = false, includeTimeOfDay = true, allowPast = true, allowToday = true, allowFuture = true, description = "Date and time when the story was last modified", attributes = {@Attribute(name = "visualWidth", value = "S"), @Attribute(name = "dateFormat", value = "'MMM DD, yyyy h:mm:ss a'")}, options = {})
+    public Long lastModifiedDate;
 
     public Map<String, Object> toFields() {
         Story story = this;
@@ -83,10 +94,13 @@ public class Story {
         fieldMap.put("Story Type", story.storyType);
         fieldMap.put("Story Key", story.storyKey);
         fieldMap.put("Id", story.id);
+        fieldMap.put("Parent Key", story.parentKey);
         fieldMap.put("Project Key", story.projectKey);
         fieldMap.put("Priority", story.priority);
         fieldMap.put("Status", story.status);
         fieldMap.put("Description", story.description);
+        fieldMap.put("Created Date", story.createdDate);
+        fieldMap.put("Last Modified Date", story.lastModifiedDate);
         return fieldMap;
     }
 

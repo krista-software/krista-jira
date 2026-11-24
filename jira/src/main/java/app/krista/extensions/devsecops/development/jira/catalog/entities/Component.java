@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -27,20 +27,20 @@ import java.util.Map;
         ecosystemId = "catEntryEcosystem_98c365b2-ab5a-463a-ac13-6da05a67c417",
         ecosystemName = "Dev Sec Ops",
         ecosystemVersion = "9ecbdb67-0c39-44de-85e6-af51f0714136")
-@Entity(name = "Component", id = "localDomainEntity_b2264514-6722-477f-86c9-5a8365e65ce5", primaryKey = "Id", supportStore = false)
+@Entity(name = "Component", id = "localDomainEntity_b2264514-6722-477f-86c9-5a8365e65ce5", primaryKey = "Id", supportStore = true, description = "Represents a project component in Jira. Belongs to a Ticket Project (via Project referencing Ticket Project.Name). Referenced by Issue.Components.")
 public class Component {
 
-    @Field(name = "Id", type = "Text", required = false)
+    @Field.Text(name = "Id", description = "Internal Jira identifier for the component", required = false)
     public final String id;
 
     @Searchable
     @ToString
-    @Field(name = "Name", type = "Text", required = false)
+    @Field.Text(name = "Name", description = "Name of the project component. Referenced by Issue.Components.", required = false)
     public final String name;
 
     @Searchable
     @ToString
-    @Field(name = "Project", type = "Text", required = false)
+    @Field.Text(name = "Project", description = "Jira project this component belongs to. References Ticket Project.Name.", required = false)
     public final String project;
 
     public Map<String, Object> toFields() {

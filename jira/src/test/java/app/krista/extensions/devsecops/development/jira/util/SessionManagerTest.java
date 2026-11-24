@@ -13,12 +13,13 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.util;
 
 import app.krista.extensions.util.KeyValueStore;
+import com.google.gson.Gson;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,8 +41,11 @@ class SessionManagerTest {
 
     /**
      * Simple in-memory implementation of KeyValueStore for testing.
+     * Simulates RestKeyValueStore's Gson-based deserialization in get() so that
+     * round-trips through KeyValueRefreshTokenStore.store()/get() are transparent.
      */
     private static class TestKeyValueStore implements KeyValueStore {
+        private static final Gson GSON = new Gson();
         private final Map<String, Object> store = new HashMap<>();
 
         @Override
@@ -50,10 +54,16 @@ class SessionManagerTest {
         }
 
         @Override
+        @SuppressWarnings("unchecked")
         public <T> T get(String key, Class<T> type) {
             Object value = store.get(key);
             if (value == null) {
                 return null;
+            }
+            if (type == String.class && value instanceof String) {
+                // Simulate RestKeyValueStore: values are stored as JSON-encoded strings;
+                // apply Gson deserialization to match production behaviour.
+                return (T) GSON.fromJson((String) value, String.class);
             }
             return type.cast(value);
         }
@@ -410,6 +420,81 @@ class SessionManagerTest {
         // Assert
         assertEquals(refToken, result);
         assertTrue(result.contains("\t"));
+    }
+
+    // ===== Tests for KeyValueRefreshTokenStore methods inherited in refactor =====
+
+    @Test
+    @DisplayName("store() then get() returns the stored value (new SDK methods)")
+    void testStore_ThenGet_ReturnsValue() {
+        // Arrange
+        String key = "sdk-key-1";
+        String token = "sdk-refresh-token-1";
+
+        // Act
+        sessionManager.store(key, token);
+        String result = sessionManager.get(key);
+
+        // Assert
+        assertEquals(token, result);
+    }
+
+    @Test
+    @DisplayName("get() returns null for non-existent key")
+    void testGet_NonExistentKey_ReturnsNull() {
+        assertNull(sessionManager.get("no-such-key"));
+    }
+
+    @Test
+    @DisplayName("remove() deletes the stored token")
+    void testRemove_DeletesToken() {
+        // Arrange
+        String key = "sdk-key-2";
+        sessionManager.store(key, "token-to-remove");
+
+        // Act
+        sessionManager.remove(key);
+
+        // Assert
+        assertNull(sessionManager.get(key));
+    }
+
+    @Test
+    @DisplayName("store() overwrites existing token")
+    void testStore_OverwritesExistingToken() {
+        String key = "sdk-key-3";
+        sessionManager.store(key, "first-token");
+        sessionManager.store(key, "second-token");
+
+        assertEquals("second-token", sessionManager.get(key));
+    }
+
+    @Test
+    @DisplayName("store() with null token stores null and get() returns null")
+    void testStore_NullToken_GetReturnsNull() {
+        String key = "sdk-null-key";
+        sessionManager.store(key, null);
+        assertNull(sessionManager.get(key));
+    }
+
+    @Test
+    @DisplayName("SessionManager has @Service annotation (SDK refactor requirement)")
+    void testHasServiceAnnotation() {
+        assertTrue(SessionManager.class.isAnnotationPresent(org.jvnet.hk2.annotations.Service.class));
+    }
+
+    @Test
+    @DisplayName("SessionManager has @Inject annotation on constructor")
+    void testHasInjectAnnotation() throws NoSuchMethodException {
+        var ctor = SessionManager.class.getConstructor(app.krista.extensions.util.KeyValueStore.class);
+        assertTrue(ctor.isAnnotationPresent(javax.inject.Inject.class));
+    }
+
+    @Test
+    @DisplayName("SessionManager extends KeyValueRefreshTokenStore")
+    void testExtendsKeyValueRefreshTokenStore() {
+        assertTrue(app.krista.sdk.atlassian.oauth.KeyValueRefreshTokenStore.class
+                .isAssignableFrom(SessionManager.class));
     }
 }
 

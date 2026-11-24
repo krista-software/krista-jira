@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira;
@@ -32,8 +32,10 @@ import java.util.Map;
 @Field.Text(value = JiraAttributes.HOST_URL, required = false)
 @Field.Text(value = JiraAttributes.CLIENT_ID, required = false)
 @Field.Text(value = JiraAttributes.CLIENT_SECRET, isSecured = true, required = false)
-@Extension(version = "2.0.23", jaxrsId = "jiraextn", name = "Jira Project Management")
+@Extension(version = "4.0.2", jaxrsId = "jiraextn", name = "Jira Project Management",  implementationModel = Extension.ImplementationModel.Krista_4_O)
+@Containerize(baseImageVersion = "3.6.2-sp3")
 @StaticResource(path = "docs", file = "docs")
+@ChangeLog(file = "docs/pages/releaseNotes.md")
 public final class JiraExtension {
 
     private final JiraRequestAuthenticator jiraRequestAuthenticator;
@@ -50,7 +52,11 @@ public final class JiraExtension {
 
     @InvokerRequest(InvokerRequest.Type.CUSTOM_TABS)
     public Map<String, String> customTabs() {
-        return Map.of("Documentation", "static/docs");
+        return Map.of(
+                "Documentation", "static/docs",
+                "Authentication", "jiraextn/sdk/auth/",
+                "Jira Audit", "jiraextn/sdk/audit/",
+                "AI Assistant", "jiraextn/mcp-setup");
     }
 
     @InvokerRequest(InvokerRequest.Type.TEST_CONNECTION)

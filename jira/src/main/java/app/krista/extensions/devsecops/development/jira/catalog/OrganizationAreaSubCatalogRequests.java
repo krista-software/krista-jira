@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog;
@@ -24,9 +24,9 @@ import app.krista.extension.impl.anno.Field;
 import app.krista.extension.impl.anno.SubCatalogRequest;
 import app.krista.extensions.devsecops.development.jira.catalog.errorhandlers.ErrorHandlingStateManager;
 import app.krista.extensions.devsecops.development.jira.catalog.errorhandlers.ExtensionResponseGenerator;
-import app.krista.extensions.devsecops.development.jira.catalog.extresp.ExtensionResponseFactory;
+import app.krista.sdk.atlassian.extresp.ExtensionResponseFactory;
 import app.krista.extensions.devsecops.development.jira.catalog.extresp.JiraResources;
-import app.krista.extensions.devsecops.development.jira.catalog.extresp.RemediationActionFactory;
+import app.krista.sdk.atlassian.extresp.RemediationActionFactory;
 import app.krista.extensions.devsecops.development.jira.catalog.validators.ValidationOrchestrator;
 import app.krista.extensions.devsecops.development.jira.impl.IssueDao;
 import app.krista.extensions.devsecops.development.jira.impl.KristaMediaClient;
@@ -41,9 +41,9 @@ import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import javax.validation.constraints.NotNull;
-import java.io.IOException;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -130,7 +130,7 @@ public class OrganizationAreaSubCatalogRequests {
     )
     @SuppressWarnings("unchecked")
     public ExtensionResponse confirmReenterForCreateIssue(@Field.Desc(name = "inputMap",
-            type = "{ re-enter: Boolean, stateId: Text, Project Key: Text, Summary: Text, Description: Text, Issue Type: Text }",
+            type = "{ re-enter: Boolean, stateId: Text, Project Key: Text, Summary: Text, Description: Text, Issue Type: Text, Reporter Account Id: Text }",
             required = true) Map<String, Object> map) {
         Boolean reenter = (Boolean) map.get(JiraConstants.RE_ENTER);
         String stateId = (String) map.get("stateId");
@@ -141,12 +141,16 @@ public class OrganizationAreaSubCatalogRequests {
                     validationResults, null,
                     Map.of());
         }
+        Map<String, Object> responseMap = new HashMap<>(Map.of(JiraConstants.STATE_ID, stateId,
+                JiraResources.PROJECT_KEY, map.get(JiraResources.PROJECT_KEY),
+                JiraResources.SUMMARY, map.get(JiraResources.SUMMARY),
+                JiraResources.DESCRIPTION, map.get(JiraResources.DESCRIPTION),
+                JiraResources.ISSUE_TYPE, map.get(JiraResources.ISSUE_TYPE)));
+        if (map.get(JiraResources.REPORTER_ACCOUNT_ID) != null) {
+            responseMap.put(JiraResources.REPORTER_ACCOUNT_ID, map.get(JiraResources.REPORTER_ACCOUNT_ID));
+        }
         return responseGenerator.generateFetchResponse(ExtensionResponse.Error.ExceptionType.INPUT_ERROR,
-                validationResults, "handleReenteredForCreateIssue",
-                Map.of(JiraConstants.STATE_ID, stateId, JiraResources.PROJECT_KEY, map.get(JiraResources.PROJECT_KEY),
-                        JiraResources.SUMMARY, map.get(JiraResources.SUMMARY),
-                        JiraResources.DESCRIPTION, map.get(JiraResources.DESCRIPTION),
-                        JiraResources.ISSUE_TYPE, map.get(JiraResources.ISSUE_TYPE)));
+                validationResults, "handleReenteredForCreateIssue", responseMap);
     }
 
     @SubCatalogRequest(
@@ -157,18 +161,19 @@ public class OrganizationAreaSubCatalogRequests {
     @Field.Desc(name = "New Issue", type = "Entity(Issue)")
     @SuppressWarnings("unchecked")
     public ExtensionResponse handleReenteredForCreateIssue(@Field.Desc(name = "inputMap",
-            type = "{ Valid Project Key: Text, stateId: Text, Project Key: Text, Summary: Text, Description: Text, Issue Type: Text  }",
+            type = "{ Valid Project Key: Text, stateId: Text, Project Key: Text, Summary: Text, Description: Text, Issue Type: Text, Reporter Account Id: Text }",
             required = true) Map<String, Object> map) {
         try {
             String projectKey = (String) map.get(JiraResources.PROJECT_KEY);
             String summary = (String) map.get(JiraResources.SUMMARY);
+            String reporterAccountId = (String) map.get(JiraResources.REPORTER_ACCOUNT_ID);
             ExtensionResponse projectKeyErrorResponse = getProjectKeyResponse(map);
             if (projectKeyErrorResponse != null) return projectKeyErrorResponse;
             ExtensionResponse summaryErrorResponse = getSummaryErrorResponse(map);
             if (summaryErrorResponse != null) return summaryErrorResponse;
             return ExtensionResponseFactory.create(Map.of("New Issue",
                     issueDao.createIssue(projectKey, summary,
-                            (String) map.get(JiraResources.DESCRIPTION), null, (String) map.get(JiraResources.ISSUE_TYPE))));
+                            (String) map.get(JiraResources.DESCRIPTION), null, (String) map.get(JiraResources.ISSUE_TYPE), reporterAccountId)));
         } catch (Exception cause) {
             logger.error("Failed to create ticket : {}", cause.getMessage());
             return ExtensionResponseFactory.create(cause, "Failed to create ticket : " + cause.getMessage(),

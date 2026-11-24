@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -30,18 +30,18 @@ import app.krista.extension.impl.anno.*;
         ecosystemId = "catEntryEcosystem_98c365b2-ab5a-463a-ac13-6da05a67c417",
         ecosystemName = "Dev Sec Ops",
         ecosystemVersion = "f376e5a4-a15d-4a3f-b274-cafb36d98bc0")
-@Entity(name = "Issue Type", id = "localDomainEntity_03c74f6d-d9ca-4ad4-9935-d1877df27b68", primaryKey = "Id", supportStore = false)
+@Entity(name = "Issue Type", id = "localDomainEntity_03c74f6d-d9ca-4ad4-9935-d1877df27b68", primaryKey = "Id", supportStore = true, description = "Represents a type of issue in Jira. The Name field is referenced by Issue.Issue Type.")
 public class IssueType {
 
-    @Field(name = "Sub Task", type = "Text")
+    @Field.Text(name = "Sub Task", description = "Indicates whether this issue type is a subtask")
     public String subTask;
 
-    @Field(name = "Id", type = "Text")
+    @Field.Text(name = "Id", description = "Internal Jira identifier for the issue type")
     public String id;
 
     @Searchable
     @ToString
-    @Field(name = "Name", type = "Text")
+    @Field.Text(name = "Name", description = "Name of the issue type. Referenced by Issue.Issue Type.")
     public String name;
 
     @ToString

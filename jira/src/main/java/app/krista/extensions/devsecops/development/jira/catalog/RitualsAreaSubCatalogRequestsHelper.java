@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog;
@@ -25,9 +25,9 @@ import app.krista.extension.impl.anno.SubCatalogRequest;
 import app.krista.extensions.devsecops.development.jira.catalog.entities.Issue;
 import app.krista.extensions.devsecops.development.jira.catalog.errorhandlers.ErrorHandlingStateManager;
 import app.krista.extensions.devsecops.development.jira.catalog.errorhandlers.ExtensionResponseGenerator;
-import app.krista.extensions.devsecops.development.jira.catalog.extresp.ExtensionResponseFactory;
+import app.krista.sdk.atlassian.extresp.ExtensionResponseFactory;
 import app.krista.extensions.devsecops.development.jira.catalog.extresp.JiraResources;
-import app.krista.extensions.devsecops.development.jira.catalog.extresp.RemediationActionFactory;
+import app.krista.sdk.atlassian.extresp.RemediationActionFactory;
 import app.krista.extensions.devsecops.development.jira.catalog.validators.ValidationOrchestrator;
 import app.krista.extensions.devsecops.development.jira.impl.IssueDao;
 import app.krista.extensions.devsecops.development.jira.impl.ProjectDao;
@@ -48,9 +48,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-
-import static app.krista.extensions.devsecops.development.jira.util.JiraConstants.ERRORS;
-import static app.krista.extensions.devsecops.development.jira.util.JiraConstants.JQL_QUERY;
 
 @Service
 public class RitualsAreaSubCatalogRequestsHelper {
@@ -79,84 +76,6 @@ public class RitualsAreaSubCatalogRequestsHelper {
         this.ritualsArea = ritualsArea;
         this.ticketInfoDao = ticketInfoDao;
         this.projectDao = projectDao;
-    }
-
-    @SubCatalogRequest(
-            name = "confirmReenterJQLQuery",
-            description = "Checks if user wants to re enter JQL Query and if yes, sends prompt to do so",
-            type = CatalogRequest.Type.QUERY_SYSTEM
-    )
-    @SuppressWarnings("unchecked")
-    public ExtensionResponse confirmReenterJQLQuery(@Field.Desc(name = "inputMap",
-            type = "{ re-enter: Boolean, stateId: Text, JQL Query: Paragraph }",
-            required = true) Map<String, Object> map) {
-        Boolean reenter = (Boolean) map.get(JiraConstants.RE_ENTER);
-        String stateId = (String) map.get("stateId");
-        Map<String, Object> state = internalStateManager.get(stateId);
-        List<ValidationOrchestrator.ValidationResult> validationResults =
-                getValidationResults(state);
-        if (Boolean.FALSE.equals(reenter)) {
-            return responseGenerator.generateFetchDenyResponse(ExtensionResponse.Error.ExceptionType.INPUT_ERROR,
-                    validationResults, null,
-                    Map.of());
-        }
-        return responseGenerator.generateFetchResponse(ExtensionResponse.Error.ExceptionType.INPUT_ERROR,
-                validationResults, "handleReenterJQLQuery",
-                Map.of("stateId",
-                        stateId, JQL_QUERY, map.get(JQL_QUERY)));
-    }
-
-    @SubCatalogRequest(
-            name = "handleReenterJQLQuery",
-            description = "Use the new details to JQL Query",
-            type = CatalogRequest.Type.QUERY_SYSTEM
-    )
-    @Field.Desc(name = "Task ID", type = "Text")
-    @SuppressWarnings("unchecked")
-    public ExtensionResponse handleReenterJQLQuery(@Field.Desc(name = "inputMap",
-            type = "{ stateId: Text, JQL Query: Paragraph }",
-            required = true) Map<String, Object> map) {
-        try {
-            boolean invokeAsUser = requestContext.invokeAsUser();
-            String invokerId = requestContext.getInvokerId();
-            String stateId = (String) map.get("stateId");
-            Map<String, Object> state = internalStateManager.get(stateId);
-            String accountID = (String) state.get("AccountID");
-            String taskId = (String) state.get("Task ID");
-            String jQLQuery = (String) map.get(JQL_QUERY);
-
-            try {
-                Map<String, String> queryData = issueDao.fetchErrorsInJQLQuery(invokeAsUser, accountID, invokerId, jQLQuery);
-                if (queryData.containsKey(ERRORS)) {
-                    return ExtensionResponseFactory.create(queryData.get(ERRORS), ExtensionResponse.Error.ExceptionType.INPUT_ERROR,
-                            List.of(RemediationActionFactory.createInformActionALLParticipants(queryData.get(ERRORS), List.of())),
-                            null, Map.of());
-                }
-            } catch (Exception cause) {
-                return ExtensionResponseFactory.create(cause, "Error occurred while Validating JQL Query",
-                        ExtensionResponse.Error.ExceptionType.LOGIC_ERROR);
-            }
-            executorService.submit(() -> {
-                List<Issue> issues;
-                FreeForm freeForm = new FreeForm();
-                try {
-                    issues = issueDao.searchByJqlQuery(invokeAsUser, accountID, invokerId, jQLQuery, JiraConstants.DEFAULT_PAGE_SIZE);
-
-                    freeForm.put(RitualsArea.IS_ERROR, "Switch", false);
-                    freeForm.put("Data", "[ Entity(Issue) ]", issues);
-                } catch (Exception cause) {
-                    freeForm.put(RitualsArea.IS_ERROR, "Switch", true);
-                    freeForm.put(RitualsArea.ERROR_MESSAGE, "Text", "Error occurred while fetching JQL - " + cause.getMessage());
-                }
-
-                eventHandler.handleEvent(taskId, freeForm);
-            });
-            return ExtensionResponseFactory.create(Map.of(
-                    "Task ID", taskId));
-        } catch (Exception cause) {
-            return ExtensionResponseFactory.create(cause, "Failed to add comment",
-                    ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
-        }
     }
 
     @NotNull

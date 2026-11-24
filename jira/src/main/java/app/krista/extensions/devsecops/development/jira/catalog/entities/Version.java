@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -29,14 +29,14 @@ import app.krista.extension.impl.anno.*;
         ecosystemId = "catEntryEcosystem_98c365b2-ab5a-463a-ac13-6da05a67c417",
         ecosystemName = "Dev Sec Ops",
         ecosystemVersion = "7339e9c9-76fd-4b24-bf95-4c5fdc3cef85")
-@Entity(name = "Version", id = "localDomainEntity_d63874e4-1fbb-4a34-a150-2b518a032893", primaryKey = "Id", supportStore = false)
+@Entity(name = "Version", id = "localDomainEntity_d63874e4-1fbb-4a34-a150-2b518a032893", primaryKey = "Id", supportStore = true, description = "Represents a project version or release in Jira. Belongs to a Ticket Project (via Project Id referencing Ticket Project.Project Id).")
 public class Version {
 
-    @Field(name = "Id", type = "Text")
+    @Field.Text(name = "Id", description = "Internal Jira identifier for the version")
     public String id;
 
     @Searchable
-    @Field(name = "Name", type = "Text")
+    @Field.Text(name = "Name", description = "Name of the version")
     public String name;
 
     @ToString

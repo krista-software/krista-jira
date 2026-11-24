@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entityrequests;
@@ -26,14 +26,19 @@ import app.krista.extensions.devsecops.development.jira.impl.IssueDao;
 import app.krista.extensions.devsecops.development.jira.impl.ProjectDao;
 import app.krista.extensions.devsecops.development.jira.impl.TicketInfoDao;
 import app.krista.extensions.devsecops.development.jira.impl.UserDao;
+import app.krista.extensions.devsecops.development.jira.services.JiraUser;
 import app.krista.extensions.devsecops.development.jira.util.JiraConstants;
 import app.krista.model.base.EntityValue;
 import app.krista.model.entity.EntityType;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
-import static app.krista.extensions.devsecops.development.jira.impl.JQLBuilder.removeEndsWith;
+import static app.krista.sdk.atlassian.jql.JQLBuilder.removeEndsWith;
 
 public abstract class EntityImplementationService {
 
@@ -86,6 +91,49 @@ public abstract class EntityImplementationService {
     public abstract List<EntityValue> search(EntityType entityType, SearchQuery conditions, Long pageIndex, Integer pageSize);
 
     public abstract EntityValue get(EntityType entityType, String primaryKey);
+
+    private static final Set<String> USER_FIELDS = Set.of("assignee name", "reporter name");
+
+    /**
+     * Pre-processes search conditions to resolve user display names to Jira account IDs
+     * for assignee/reporter fields. Jira JQL does not support '~' (contains) on user fields,
+     * so we search for matching users via the Jira user search API and replace the condition
+     * operand with account IDs joined by '|' for IN clause generation.
+     */
+    protected List<SearchCondition> resolveUserConditions(List<SearchCondition> conditions) {
+        if (conditions == null || issueDao == null || issueDao.getUserDao() == null) {
+            return conditions;
+        }
+
+        List<SearchCondition> resolved = new ArrayList<>();
+        for (SearchCondition sc : conditions) {
+            String fieldName = sc.getFieldName();
+            if (fieldName != null
+                    && USER_FIELDS.contains(fieldName.toLowerCase(Locale.ROOT))
+                    && sc.getOperand() != null) {
+
+                String nameQuery = String.valueOf(sc.getOperand()).trim();
+                if (!nameQuery.isEmpty()) {
+                    List<JiraUser> users = issueDao.getUserDao().searchUser(nameQuery);
+                    if (!users.isEmpty()) {
+                        if (users.size() == 1) {
+                            resolved.add(new SearchCondition(
+                                    SearchCondition.Operator.equals, users.get(0).accountId, sc.getFieldName()));
+                        } else {
+                            String accountIds = users.stream()
+                                    .map(u -> u.accountId)
+                                    .collect(Collectors.joining("|"));
+                            resolved.add(new SearchCondition(
+                                    SearchCondition.Operator.contains, accountIds, sc.getFieldName()));
+                        }
+                        continue;
+                    }
+                }
+            }
+            resolved.add(sc);
+        }
+        return resolved;
+    }
 
     public List<Issue> searchBySummaryIssueTypeProjectKey(String projectKey, String text, String issueType, long size, long page) {
         StringBuilder q = new StringBuilder();

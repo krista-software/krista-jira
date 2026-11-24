@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -31,36 +31,36 @@ import java.util.Map;
         ecosystemId = "catEntryEcosystem_98c365b2-ab5a-463a-ac13-6da05a67c417",
         ecosystemName = "Dev Sec Ops",
         ecosystemVersion = "e69f2365-1bc2-47c8-b966-57c3b3604231")
-@Entity(name = "Issue", id = "localDomainEntity_4735e2d8-bd37-4a7d-892f-dfd899ff2336", primaryKey = "Key", supportStore = false)
+@Entity(name = "Issue", id = "localDomainEntity_4735e2d8-bd37-4a7d-892f-dfd899ff2336", primaryKey = "Key", supportStore = true, description = "Represents a generic issue in Jira that can be any issue type. Belongs to a Ticket Project (via Project Key). Issue Type references Issue Type.Name. Parent Key references the parent issue key (Bug.Bug Key, Story.Story Key, Task.Task Key, or Epic.Epic Key). Related to User (Reporter Name and Assignee Name match User.Display Name). Priority references Ticket Priority.Name. Status references Ticket Status.Name. Labels reference Label.Name. Components reference Component.Name.")
 public class Issue {
 
     @Searchable
     @ToString
-    @Field(name = "Summary", type = "Text")
+    @Field.Text(name = "Summary", description = "Brief summary of the issue")
     public String summary;
 
-    @Field.Desc(name = "Comments", type = "[ Text ]", required = false)
+    @Field.Desc(name = "Comments", type = "[ Text ]", required = false, description = "List of comments added to the issue")
     public List<String> comments;
 
-    @Field(name = "Reporter Name", type = "Text", required = false)
+    @Field.Text(name = "Reporter Name", required = false, description = "Name of the person who reported the issue. References User.Display Name.")
     public String reporterName;
 
     @ToString
-    @Field(name = "Assignee Name", type = "Text", required = false)
+    @Field.Text(name = "Assignee Name", required = false, description = "Name of the person assigned to the issue. References User.Display Name.")
     public String assigneeName;
 
     @Searchable
     @ToString
-    @Field(name = "Key", type = "Text", required = false)
+    @Field.Text(name = "Key", required = false, description = "Unique Jira key identifier for the issue")
     public String key;
 
-    @Field(name = "Id", type = "Text", required = false)
+    @Field.Text(name = "Id", required = false, description = "Internal Jira identifier for the issue")
     public String id;
 
-    @Field(name = "Parent Key", type = "Text", required = false)
+    @Field.Text(name = "Parent Key", required = false, description = "Jira key of the parent issue. References Bug.Bug Key, Story.Story Key, Task.Task Key, or Epic.Epic Key.")
     public String parentKey;
 
-    @Field(name = "Project Key", type = "Text")
+    @Field.Text(name = "Project Key", description = "Key of the Jira project this issue belongs to. References Ticket Project.Key.")
     public String projectKey;
 
     @Searchable
@@ -68,24 +68,33 @@ public class Issue {
     public String description;
 
     @Searchable
-    @Field(name = "Issue Type", type = "Text", required = false)
+    @Field.Text(name = "Issue Type", required = false, description = "Type of the Jira issue. References Issue Type.Name.")
     public String issueType;
 
-    @Field(name = "Priority", type = "Text", required = false)
+    @Searchable
+    @Field.Text(name = "Priority", required = false, description = "Priority level of the issue. References Ticket Priority.Name.")
     public String priority;
 
     @Searchable
     @ToString
-    @Field(name = "Status", type = "Text", required = false)
+    @Field.Text(name = "Status", required = false, description = "Current workflow status of the issue. References Ticket Status.Name.")
     public String status;
 
     @Searchable
-    @Field.Desc(name = "Labels", type = "[ Text ]", required = false)
+    @Field.Desc(name = "Labels", type = "[ Text ]", required = false, description = "Labels assigned to the issue. Each label references Label.Name.")
     public List<String> labels;
 
     @Searchable
-    @Field.Desc(name = "Components", type = "[ Text ]", required = false)
+    @Field.Desc(name = "Components", type = "[ Text ]", required = false, description = "Components associated with the issue. Each component references Component.Name.")
     public List<String> components;
+
+    @Searchable
+    @Field.Date(name = "Created Date", required = false, includeTimeOfDay = true, allowPast = true, allowToday = true, allowFuture = true, description = "Date and time when the issue was created", attributes = {@Attribute(name = "visualWidth", value = "S"), @Attribute(name = "dateFormat", value = "'MMM DD, yyyy h:mm:ss a'")}, options = {})
+    public Long createdDate;
+
+    @Searchable
+    @Field.Date(name = "Last Modified Date", required = false, includeTimeOfDay = true, allowPast = true, allowToday = true, allowFuture = true, description = "Date and time when the issue was last modified", attributes = {@Attribute(name = "visualWidth", value = "S"), @Attribute(name = "dateFormat", value = "'MMM DD, yyyy h:mm:ss a'")}, options = {})
+    public Long lastModifiedDate;
 
 
     public Map<String, Object> toFields() {
@@ -105,6 +114,8 @@ public class Issue {
         fieldMap.put("Status", issue.status);
         fieldMap.put("Labels", issue.labels);
         fieldMap.put("Components", issue.components);
+        fieldMap.put("Created Date", issue.createdDate);
+        fieldMap.put("Last Modified Date", issue.lastModifiedDate);
         return fieldMap;
     }
 

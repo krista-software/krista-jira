@@ -13,13 +13,12 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira;
 
 import app.krista.extension.executor.Invoker;
-import app.krista.extension.util.InvokerAttributes;
 import app.krista.extensions.devsecops.development.jira.authentication.AuthRestClient;
 import app.krista.extensions.devsecops.development.jira.authentication.JiraService;
 import app.krista.extensions.devsecops.development.jira.authentication.OAuth2RestClient;
@@ -27,189 +26,222 @@ import app.krista.extensions.devsecops.development.jira.authentication.RestClien
 import app.krista.extensions.devsecops.development.jira.util.SessionManager;
 import app.krista.ksdk.context.AuthorizationContext;
 import app.krista.ksdk.context.RequestContext;
+import app.krista.sdk.atlassian.attributes.BaseAtlassianAttributes;
+import app.krista.sdk.atlassian.attributes.CredentialFieldNames;
+import app.krista.sdk.atlassian.constants.AtlassianConstants;
 import com.google.gson.JsonObject;
 import org.jvnet.hk2.annotations.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.regex.Pattern;
 
-import static app.krista.extensions.devsecops.development.jira.util.JiraConstants.GSON;
-
+/**
+ * Jira credential attributes. Credential resolution, complete/partial/mixed
+ * detection and the {@code validateAttributes} template flow are provided by
+ * the shared {@link BaseAtlassianAttributes}; this class contributes Jira's
+ * historical field labels and the product-specific connection test against
+ * the {@code /myself} endpoint.
+ */
 @Service
-public class JiraAttributes {
+public class JiraAttributes extends BaseAtlassianAttributes {
 
     public static final String HOST_URL = "Host Url";
     public static final String USER_NAME = "Admin User Name";
     public static final String AUTH_TOKEN = "Admin Auth Token";
     public static final String CLIENT_ID = "Client Id";
     public static final String CLIENT_SECRET = "Client Secret";
-    private String hostUrl;
-    private String userName;
-    private String authToken;
-    private String clientId;
-    private String clientSecret;
-    private final Invoker invoker;
+    public static final String CREDENTIALS_MODE = "Credentials Mode";
+    public static final String SERVICE_ACCOUNT = "Service Account";
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(JiraAttributes.class);
+
+    /**
+     * Key prefix for credential snapshots persisted by {@code AbstractAtlassianAuthResource}
+     * — mirrors the private constant there so per-request attribute reconstruction can
+     * supplement missing fields from the Authentication tab's saved state.
+     */
+    private static final String CRED_PREFIX = "cred.";
+
     private final RequestContext requestContext;
     private final SessionManager sessionManager;
     private final AuthorizationContext authorizationContext;
 
-
     @Inject
     public JiraAttributes(Invoker invoker, RequestContext requestContext, SessionManager sessionManager,
                           AuthorizationContext authorizationContext) {
-        this.hostUrl = (String) invoker.getAttributes().get(HOST_URL);
-        this.userName = (String) invoker.getAttributes().get(USER_NAME);
-        this.authToken = (String) invoker.getAttributes().get(AUTH_TOKEN);
-        this.clientId = (String) invoker.getAttributes().get(CLIENT_ID);
-        this.clientSecret = (String) invoker.getAttributes().get(CLIENT_SECRET);
-        this.invoker = invoker;
+        super(invoker, new CredentialFieldNames(HOST_URL, USER_NAME, AUTH_TOKEN, CLIENT_ID, CLIENT_SECRET));
         this.requestContext = requestContext;
         this.sessionManager = sessionManager;
         this.authorizationContext = authorizationContext;
     }
 
-    public void setAttributes(Map<String, Object> attributes) {
-        hostUrl = (String) attributes.get(HOST_URL);
-        userName = (String) attributes.get(USER_NAME);
-        authToken = (String) attributes.get(AUTH_TOKEN);
-        clientId = (String) attributes.get(CLIENT_ID);
-        clientSecret = (String) attributes.get(CLIENT_SECRET);
+    /**
+     * Exposes the "Krista Managed" credentials chooser: when the
+     * {@value #CREDENTIALS_MODE} attribute is {@code "managed"}, the OAuth
+     * client id/secret come from the SDK's bundled
+     * {@code atlassian-managed-credentials.properties}.
+     */
+    @Override
+    protected String getCredentialsModeFieldName() {
+        return CREDENTIALS_MODE;
     }
 
+    /** Extension type for per-extension managed-credential overrides. */
+    @Override
+    protected String getExtensionType() {
+        return "jira";
+    }
 
+    /**
+     * Exposes the server-to-server (2LO) toggle: when the
+     * {@value #SERVICE_ACCOUNT} attribute is {@code true}, OAuth credentials
+     * are used with the client-credentials grant instead of the 3LO
+     * user-consent flow.
+     */
+    @Override
+    protected String getServiceAccountFieldName() {
+        return SERVICE_ACCOUNT;
+    }
+
+    // ── Credential getters: supplement from Authentication-tab snapshot ──────
+    //
+    // JiraAttributes is recreated per-request from invoker.getAttributes() (the
+    // Krista/Setup attribute store).  When credentials were saved exclusively
+    // through the Authentication tab they live only in the KeyValueStore snapshot
+    // (keys: "cred.<invokerId>.<field>") and are absent from the attribute store.
+    // Overriding the five credential getters to fall back to that snapshot makes
+    // areBasicCredentialsPresent() / areOAuthCredentialsPresent() return the
+    // correct answer so RestClientSelector picks the right REST client for every
+    // catalog request.
+
+    private String credSnap(String field) {
+        if (sessionManager == null || requestContext == null) return null;
+        return sessionManager.get(CRED_PREFIX + requestContext.getInvokerId() + "." + field);
+    }
+
+    @Override
     public String getHostUrl() {
-        return hostUrl;
+        String value = super.getHostUrl();
+        return (value != null && !value.isBlank()) ? value : credSnap("hostUrl");
     }
 
+    @Override
     public String getUserName() {
-        return userName;
+        String value = super.getUserName();
+        return (value != null && !value.isBlank()) ? value : credSnap("userName");
     }
 
+    @Override
     public String getAuthToken() {
-        return authToken;
+        String value = super.getAuthToken();
+        return (value != null && !value.isBlank()) ? value : credSnap("authToken");
     }
 
+    @Override
     public String getClientId() {
-        return clientId;
+        String value = super.getClientId();
+        return (value != null && !value.isBlank()) ? value : credSnap("clientId");
     }
 
+    @Override
     public String getClientSecret() {
-        return clientSecret;
+        String value = super.getClientSecret();
+        return (value != null && !value.isBlank()) ? value : credSnap("clientSecret");
     }
 
-
-    private boolean isEmailAddress(String userName) {
-        String emailRegex = "^[a-zA-Z0-9_!#$%&'*+/=?`{|}~^.-]+@[a-zA-Z0-9.-]+$";
-        return Pattern.compile(emailRegex)
-                .matcher(userName)
-                .matches();
-    }
-
-
-    public boolean basicCredentialsPresentInAttributes(Map<String, Object> attributes) {
-        return !(attributes.get(JiraAttributes.AUTH_TOKEN) == null || attributes.get(JiraAttributes.AUTH_TOKEN).toString().isBlank()) &&
-                !(attributes.get(JiraAttributes.USER_NAME) == null || attributes.get(JiraAttributes.USER_NAME).toString().isBlank()) &&
-                !(attributes.get(JiraAttributes.HOST_URL) == null || attributes.get(JiraAttributes.HOST_URL).toString().isBlank());
-    }
-
-    public boolean oAuthCredentialsPresentInAttributes(Map<String, Object> attributes) {
-        return !(attributes.get(JiraAttributes.CLIENT_ID) == null || attributes.get(JiraAttributes.CLIENT_ID).toString().isBlank()) &&
-                !(attributes.get(JiraAttributes.CLIENT_SECRET) == null || attributes.get(JiraAttributes.CLIENT_SECRET).toString().isBlank());
-    }
-
-
-    public void validateAttributes(Map<String, Object> attributes) {
-        if (!basicCredentialsPresentInAttributes(attributes) && (!oAuthCredentialsPresentInAttributes(attributes)))
-            throw new IllegalArgumentException("Either (Auth token, user name, host url) or (Client ID, Client secret) must be provided for authentication");
-
-        if (userName != null && !isEmailAddress(userName)) {
-            throw new IllegalArgumentException("User name is not a valid email address");
+    /**
+     * Determines whether managed (Quick Setup) credentials mode is active.
+     *
+     * <p>Priority order:</p>
+     * <ol>
+     *   <li><b>In-memory state</b> — set by {@code setAttributes(candidate)} /
+     *       {@code update(candidate)} during the <em>current</em> request (e.g.
+     *       when the auth tab's Save/Test Connection calls
+     *       {@code testManagedOAuthConnection}).  This MUST take precedence so
+     *       that the OAuth callback URL built within the same request reflects
+     *       the user's <em>current</em> intent, not the previous save.</li>
+     *   <li><b>Persistent credential snapshot</b> — written by
+     *       {@code persistCredentialSnapshot} on a successful auth-tab save.
+     *       Consulted when the in-memory state is null (fresh per-request
+     *       attribute construction).</li>
+     *   <li><b>Base-class auto-detection</b> — invoker attributes +
+     *       {@code ManagedCredentialStore} fallback.</li>
+     * </ol>
+     */
+    @Override
+    public boolean isManagedCredentialsEnabled() {
+        // 1. In-memory state (current request's intent — highest priority).
+        String inMemoryMode = getCredentialsModeValue();
+        if ("managed".equalsIgnoreCase(inMemoryMode)) {
+            return true;
         }
-
-        testConnection(attributes);
+        if ("own".equalsIgnoreCase(inMemoryMode)) {
+            return false;
+        }
+        // 2. Persistent credential snapshot (previous save's intent).
+        String storedMode = credSnap("credentialsMode");
+        if ("managed".equalsIgnoreCase(storedMode)) {
+            return true;
+        }
+        if ("own".equalsIgnoreCase(storedMode)) {
+            return false;
+        }
+        // 3. Base-class auto-detection.
+        return super.isManagedCredentialsEnabled();
     }
 
-    void testConnection(Map<String, Object> attributes) {
-        Map<String, Object> qparams = new HashMap<>();
-        qparams.put("jql", "assignee=currentUser() ORDER BY priority DESC, updated desc");
-        qparams.put("fields", "*all");
-        qparams.put("startAt", 0L);
-        qparams.put("maxResults", 1L);
-        RestClient restClient;
+    @Override
+    protected void testConnection(Map<String, Object> attributes) {
+        if (attributes == null) {
+            return;
+        }
         if (isPartialOAuthCredentialPresent(attributes)) {
-            throw new IllegalArgumentException("Please provide both Client Id and Client Secret");
+            throw new IllegalArgumentException(
+                    "Incomplete OAuth 2.0 credentials detected.\n"
+                            + "Please provide BOTH " + getFieldNames().clientId() + " and " + getFieldNames().clientSecret()
+                            + " for OAuth authentication.");
         }
         if (isPartialBasicCredentialPresent(attributes)) {
-            throw new IllegalArgumentException("Please provide Admin Auth Token, Admin User Name, and Host Url");
+            throw new IllegalArgumentException(
+                    "Incomplete Basic Auth credentials detected.\n"
+                            + "Please provide ALL three fields: " + getFieldNames().authToken() + ", " + getFieldNames().userName()
+                            + ", and " + getFieldNames().hostUrl() + " for Basic authentication.");
         }
         if (basicCredentialsPresentInAttributes(attributes)) {
-            restClient = new AuthRestClient(attributes, requestContext.invokeAsUser(), true);
-            testConnectionWithRestClient(qparams, restClient);
-        }
-        if (oAuthCredentialsPresentInAttributes(attributes)) {
-            restClient = new OAuth2RestClient(new JiraService(requestContext, sessionManager, invoker,
-                    authorizationContext, this));
-            testConnectionWithRestClient(qparams, restClient);
+            testConnectionWithRestClient(new AuthRestClient(attributes, requestContext.invokeAsUser(), true));
+        } else if (oAuthCredentialsPresentInAttributes(attributes) || isManagedCredentialsEnabled()) {
+            JiraService jiraService =
+                    new JiraService(requestContext, sessionManager, getInvoker(), authorizationContext, this);
+            jiraService.setCalledFromSetup(true);
+            testConnectionWithRestClient(new OAuth2RestClient(jiraService));
         }
     }
 
-
-    public boolean isPartialBasicCredentialPresent(Map<String, Object> attributes) {
-        if ((isAttributePresent(attributes, AUTH_TOKEN) && (!isAttributePresent(attributes, HOST_URL) || !isAttributePresent(attributes, USER_NAME))) ||
-                (isAttributePresent(attributes, HOST_URL) && (!isAttributePresent(attributes, AUTH_TOKEN) || !isAttributePresent(attributes, USER_NAME))) ||
-                (isAttributePresent(attributes, USER_NAME) && (!isAttributePresent(attributes, AUTH_TOKEN) || !isAttributePresent(attributes, HOST_URL)))) {
-            return true;
-        }
-        return false;
-    }
-
-
-    private boolean isPartialOAuthCredentialPresent(Map<String, Object> attributes) {
-        if ((isAttributePresent(attributes, CLIENT_ID) && !isAttributePresent(attributes, CLIENT_SECRET)) ||
-                (isAttributePresent(attributes, CLIENT_SECRET) && !isAttributePresent(attributes, CLIENT_ID))) {
-            return true;
-        }
-        return false;
-    }
-
-    private boolean isAttributePresent(Map<String, Object> attributes, String attributeName) {
-        return attributes.get(attributeName) != null && !attributes.get(attributeName).toString().isBlank();
-    }
-
-
-    private void testConnectionWithRestClient(Map<String, Object> qparams, RestClient restClient) {
-        String out = restClient.fetch("search/jql", qparams, String.class);
+    private void testConnectionWithRestClient(RestClient restClient) {
         try {
-            JsonObject jsonObject = GSON.fromJson(out, JsonObject.class);
-            if (!jsonObject.has("issues")) {
-                setAttributes(invoker.getAttributes());
-                throw new IllegalArgumentException(jsonObject.has("message") ? (jsonObject.get("message")).getAsJsonObject().getAsString() : "");
+            String out = restClient.fetch("myself", new HashMap<>(), String.class);
+            LOGGER.debug("Test Connection Response Details : {}", out);
+            JsonObject jsonObject = AtlassianConstants.GSON.fromJson(out, JsonObject.class);
+            if (jsonObject.has("message") || (!jsonObject.has("self") && !jsonObject.has("accountId"))) {
+                setAttributes(getInvoker().getAttributes());
+                throw new IllegalArgumentException("The credentials provided are incorrect. Please ensure the Host Url, User Name and Admin Auth Token are correct.");
             }
+            LOGGER.info("Connection test successful!");
+        } catch (app.krista.extension.authorization.MustAuthorizeException cause) {
+            LOGGER.info("OAuth authorization required - redirecting to Atlassian login...");
+            throw cause;
+        } catch (IllegalStateException cause) {
+            setAttributes(getInvoker().getAttributes());
+            LOGGER.error("Connection test failed: {}", cause.getMessage());
+            throw new IllegalArgumentException(cause.getMessage(), cause);
         } catch (Exception cause) {
-            setAttributes(invoker.getAttributes());
-            throw new IllegalArgumentException("Wrong Credentials!", cause);
+            setAttributes(getInvoker().getAttributes());
+            LOGGER.error("Connection test failed: {}", cause.getMessage());
+            throw new IllegalArgumentException("The credentials provided are incorrect. Please ensure the Host Url, User Name and Admin Auth Token are correct.", cause);
         }
-    }
-
-    public boolean areBasicCredentialsPresent() {
-        return !((userName == null || userName.isBlank()) ||
-                (authToken == null || authToken.isBlank()) ||
-                (hostUrl == null || hostUrl.isBlank()));
-    }
-
-    public boolean areOAuthCredentialsPresent() {
-        return !((clientId == null || clientId.isBlank()) ||
-                (clientSecret == null || clientSecret.isBlank()));
-    }
-
-    public void update(Map<String, Object> attributes) {
-        clientId = InvokerAttributes.getStringOrNull(attributes, CLIENT_ID);
-        clientSecret = InvokerAttributes.getStringOrNull(attributes, CLIENT_SECRET);
-        userName = InvokerAttributes.getStringOrNull(attributes, USER_NAME);
-        hostUrl = InvokerAttributes.getStringOrNull(attributes, HOST_URL);
-        authToken = InvokerAttributes.getStringOrNull(attributes, AUTH_TOKEN);
     }
 
 }

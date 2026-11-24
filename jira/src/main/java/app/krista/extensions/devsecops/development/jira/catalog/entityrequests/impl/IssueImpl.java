@@ -13,16 +13,18 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entityrequests.impl;
 
+import app.krista.extension.executor.QueryClause;
 import app.krista.extension.executor.SearchCondition;
 import app.krista.extension.executor.SearchQuery;
 import app.krista.extensions.devsecops.development.jira.catalog.entities.Issue;
 import app.krista.extensions.devsecops.development.jira.catalog.entityrequests.EntityImplementationService;
 import app.krista.extensions.devsecops.development.jira.impl.IssueDao;
+import app.krista.extensions.devsecops.development.jira.impl.SearchConditionTranslator;
 import app.krista.extensions.devsecops.development.jira.impl.TicketInfoDao;
 import app.krista.extensions.devsecops.development.jira.util.JiraConstants;
 import app.krista.model.base.EntityValue;
@@ -102,40 +104,33 @@ public final class IssueImpl extends EntityImplementationService {
 
     @Override
     public List<EntityValue> search(EntityType entityType, SearchQuery searchQuery, Long pageIndex, Integer pageSize) {
-        List<SearchCondition> conditions = searchQuery.getSearchConditions();
-        String projectKey = getConditionValue(conditions, "Project key");
-        List<EntityValue> list = new ArrayList<>();
-        List<Issue> issues;
-        for (SearchCondition condition : conditions) {
-            String selector = condition.getFieldName();
-            String matchPattern = condition.getOperand() != null ? String.valueOf(condition.getOperand()).trim() : "";
-            switch (selector.toLowerCase(Locale.ROOT)) {
-                case "summary":
-                    issues = searchBySummaryIssueTypeProjectKey(projectKey, matchPattern, "", pageSize, pageIndex);
-                    list = getEntityList(issues, pageSize, entityType.getEntityName());
-                    break;
-                case "description":
-                    issues = searchByTextIssueTypeProjectKey(projectKey, matchPattern, "", pageSize, pageIndex);
-                    list = getEntityList(issues, pageSize, entityType.getEntityName());
-                    break;
-                case "status":
-                    issues = getIssuesByStatus(matchPattern);
-                    list = getEntityList(issues, pageSize, entityType.getEntityName());
-                    break;
-                case "issue type":
-                    issues = searchBySummaryIssueTypeProjectKey(projectKey, "", matchPattern, pageSize, pageIndex);
-                    list = getEntityList(issues, pageSize, entityType.getEntityName());
-                    break;
-                case "key":
-                    Issue issue = getIssueService().getIssueFinal(matchPattern);
-                    list.add(new EntityValue(entityType.getEntityName(), issue.toFields()));
+        List<SearchCondition> conditions = resolveUserConditions(searchQuery.getSearchConditions());
+        List<QueryClause> clauses = searchQuery.getQueryClauses();
+
+        // Special case: single Key lookup by equals or null operator — direct GET
+        if (conditions.size() == 1) {
+            SearchCondition only = conditions.get(0);
+            if ("key".equalsIgnoreCase(only.getFieldName())
+                    && only.getOperand() != null
+                    && (only.getOperator() == null
+                        || only.getOperator() == SearchCondition.Operator.equals)) {
+                String key = String.valueOf(only.getOperand()).trim();
+                Issue issue = getIssueService().getIssueFinal(key);
+                return List.of(new EntityValue(entityType.getEntityName(), issue.toFields()));
             }
         }
-        if (conditions.size() == 1 && list.isEmpty()) {
-            issues = searchBySummary("", pageSize, pageIndex);
-            list = getEntityList(issues, pageSize, entityType.getEntityName());
+
+        // Build JQL from all conditions and clauses
+        String jql = SearchConditionTranslator.toJql(conditions, clauses);
+
+        if (jql == null || jql.isBlank()) {
+            // Fallback: no usable conditions, return current user's issues
+            List<Issue> issues = searchBySummary("", pageSize, pageIndex);
+            return getEntityList(issues, pageSize, entityType.getEntityName());
         }
-        return list;
+
+        List<Issue> issues = getIssueService().searchByJQL(jql, pageSize, pageIndex);
+        return getEntityList(issues, pageSize, entityType.getEntityName());
     }
 
     private List<EntityValue> getEntityList(List<Issue> issues, Integer pageSize, String entityName) {

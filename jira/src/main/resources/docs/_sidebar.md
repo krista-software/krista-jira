@@ -20,6 +20,7 @@
 * **Issue Management & Workflows**
     * [Get Issues](pages/GetIssues.md)
     * [Get User Issues](pages/GetUserIssues.md)
+    * [Get Issues by User Names](pages/GetIssuesByUserNames.md)
     * [Get My Issues by Given Statuses](pages/GetMyIssuesByGivenStatuses.md)
     * [Get User Issue by Issue Type](pages/GetUserIssueByIssueType.md)
     * [Get Issue By Key](pages/GetIssueByKey.md)
@@ -36,11 +37,14 @@
 * **Release Management**
     * [Get Release Summary](pages/GetReleaseSummary.md)
 
+* **AI Assistant**
+    * [AI Assistant](pages/AiAssistant.md)
+
 * **Advanced Topics**
     * [JQL Query Guide](pages/JQLQueryGuide.md)
 
 * **Legacy Documentation**
-    * [Getting OAuth2.0 Credentials](pages/GettingOAuth2Credentials.md)
+    * [Creating a Jira OAuth App](pages/GettingOAuth2Credentials.md)
     * [Getting Basic Auth Credentials](pages/GettingBasicAuthCredentials.md)
     * [Setting Up Jira Extension](pages/SettingUpJiraExtension.md)
     * [Webhook Setup](pages/WebhookSettings.md)

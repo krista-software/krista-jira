@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -30,15 +30,15 @@ import app.krista.extension.impl.anno.*;
         ecosystemId = "catEntryEcosystem_98c365b2-ab5a-463a-ac13-6da05a67c417",
         ecosystemName = "Dev Sec Ops",
         ecosystemVersion = "7339e9c9-76fd-4b24-bf95-4c5fdc3cef85")
-@Entity(name = "Ticket Status", id = "localDomainEntity_a8c7ae11-87bd-4409-8af0-42e1f269d149", primaryKey = "Id", supportStore = false)
+@Entity(name = "Ticket Status", id = "localDomainEntity_a8c7ae11-87bd-4409-8af0-42e1f269d149", primaryKey = "Id", supportStore = true, description = "Represents a workflow status for Jira tickets. The Name field is referenced by the Status field on Bug, Story, Epic, Task, Subtask, and Issue entities. Also referenced by Transition Status (From Name and To Name).")
 public class TicketStatus {
 
-    @Field(name = "Id", type = "Text")
+    @Field.Text(name = "Id", description = "Internal Jira identifier for the status")
     public String id;
 
     @Searchable
     @ToString
-    @Field(name = "Name", type = "Text")
+    @Field.Text(name = "Name", description = "Name of the workflow status. Referenced by Bug.Status, Story.Status, Epic.Status, Task.Status, Subtask.Status, Issue.Status, Transition Status.From Name, and Transition Status.To Name.")
     public String name;
 
     @ToString

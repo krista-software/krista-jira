@@ -13,24 +13,26 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.authentication;
 
+import app.krista.sdk.atlassian.client.AtlassianRestClient;
 import com.mashape.unirest.http.HttpResponse;
 import com.mashape.unirest.http.JsonNode;
 
-import javax.ws.rs.client.Invocation;
 import java.io.File;
 import java.util.List;
 import java.util.Map;
 
-public interface RestClient {
-
-    Invocation.Builder getResourceInvoker(String resource, Map<String, Object> queryParams);
-
-    <T> T fetch(String resource, Map<String, Object> queryParams, Class<T> type);
+/**
+ * Jira REST client contract. The shared plumbing
+ * ({@code getResourceInvoker}/{@code fetch}/{@code getAccessToken}) is
+ * inherited from {@link AtlassianRestClient}; this interface keeps Jira's
+ * JQL and attachment helpers.
+ */
+public interface RestClient extends AtlassianRestClient {
 
     String parseAndValidateJQL(String jql, Boolean invokeAsUser, String accountId, String invokerId);
 
@@ -40,6 +42,9 @@ public interface RestClient {
 
     HttpResponse<JsonNode> attachFile(String resource, List<File> files);
 
-    String getJiraAccessToken();
+    /** Legacy alias for {@link #getAccessToken()}; kept for backward compatibility. */
+    default String getJiraAccessToken() {
+        return getAccessToken();
+    }
 
 }

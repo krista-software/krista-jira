@@ -10,7 +10,12 @@
         <Root level="info">
             <AppenderRef ref="console"/>
         </Root>
-        <Logger name="app.krista.extensions" additivity="false" level="debug">
+        <!-- Jira extension classes (OrganizationArea, IssueDao, catalog, impl, …) -->
+        <Logger name="app.krista.extensions" additivity="false" level="trace">
+            <AppenderRef ref="console" />
+        </Logger>
+        <!-- Shared Atlassian SDK (getAccessToken, OAuth, token store, request authenticator) -->
+        <Logger name="app.krista.sdk.atlassian" additivity="false" level="trace">
             <AppenderRef ref="console" />
         </Logger>
     </Loggers>

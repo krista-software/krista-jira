@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog;
@@ -24,10 +24,12 @@ import app.krista.extension.impl.anno.Attribute;
 import app.krista.extension.impl.anno.CatalogRequest;
 import app.krista.extension.impl.anno.Domain;
 import app.krista.extension.impl.anno.Field;
+import app.krista.extensions.devsecops.development.jira.api.JiraAuditService;
 import app.krista.extensions.devsecops.development.jira.JiraAttributes;
 import app.krista.extensions.devsecops.development.jira.authentication.RestClient;
 import app.krista.extensions.devsecops.development.jira.authentication.RestClientFactory;
-import app.krista.extensions.devsecops.development.jira.catalog.extresp.ExtensionResponseFactory;
+import app.krista.extensions.devsecops.development.jira.impl.IssueDao;
+import app.krista.sdk.atlassian.extresp.ExtensionResponseFactory;
 import app.krista.extensions.devsecops.development.jira.util.TelemetryConstants;
 import app.krista.ksdk.context.AuthorizationContext;
 import app.krista.ksdk.context.RequestContext;
@@ -65,35 +67,26 @@ public class SetUpArea {
     private final RequestContext requestContext;
     private final AuthorizationContext authorizationContext;
     private final TelemetryMetrics telemetryMetrics;
+    private final IssueDao issueDao;
+    private final JiraAuditService jiraAuditService;
 
-    /**
-     * Constructs a new SetUpArea with required dependencies.
-     * <p>
-     * All dependencies are injected via constructor using JSR-330 {@code @Inject} annotation.
-     * This ensures proper dependency management and testability.
-     * </p>
-     *
-     * @param restClientFactory Factory for creating authenticated REST clients
-     * @param jiraAttributes    JIRA connection configuration and credentials
-     * @param invoker          Extension attribute accessor and updater
-     * @param requestContext   Current request context and metadata
-     * @param authorizationContext Authorization and permission context
-     * @param telemetryMetrics Telemetry metrics collector
-     * @throws NullPointerException if any parameter is null
-     */
     @Inject
     public SetUpArea(RestClientFactory restClientFactory,
                      JiraAttributes jiraAttributes,
                      Invoker invoker,
                      RequestContext requestContext,
                      AuthorizationContext authorizationContext,
-                     TelemetryMetrics telemetryMetrics) {
+                     TelemetryMetrics telemetryMetrics,
+                     IssueDao issueDao,
+                     JiraAuditService jiraAuditService) {
         this.restClientFactory = restClientFactory;
         this.jiraAttributes = jiraAttributes;
         this.invoker = invoker;
         this.requestContext = requestContext;
         this.authorizationContext = authorizationContext;
         this.telemetryMetrics = telemetryMetrics;
+        this.issueDao = issueDao;
+        this.jiraAuditService = jiraAuditService;
     }
 
     /**
@@ -107,7 +100,7 @@ public class SetUpArea {
             name = "Check System Health",
             description = "Verify JIRA connectivity, authentication status, and extension health. Returns comprehensive diagnostic information including connection status, API availability, and configuration validity.",
             area = "SetUp",
-            type = CatalogRequest.Type.QUERY_SYSTEM)
+            type = CatalogRequest.Type.QUERY_SYSTEM, tool = true)
     @Field.Boolean(name = "Is Healthy", required = false, attributes = {@Attribute(name = "toolTip", value = "'Overall health status of the JIRA extension. True indicates all systems operational.'")}, options = {})
     @Field.Text(name = "Status", required = false, attributes = {@Attribute(name = "toolTip", value = "'Current health status: HEALTHY, DEGRADED, or UNHEALTHY.'")}, options = {})
     @Field.Text(name = "JIRA Instance URL", required = false, attributes = {@Attribute(name = "toolTip", value = "'The configured JIRA instance URL being monitored.'")}, options = {})
@@ -120,8 +113,15 @@ public class SetUpArea {
         logger.info("Initiating JIRA health check");
         long startTime = System.currentTimeMillis();
 
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Check System Health");
+        boolean auditRecorded = false;
         try {
             telemetryMetrics.incrementCounter(TelemetryConstants.SetUpArea.HEALTHCHECK_REQUEST_TOTAL, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             Map<String, Object> healthStatus = new LinkedHashMap<>();
             boolean isHealthy = true;
@@ -236,6 +236,8 @@ public class SetUpArea {
             return ExtensionResponseFactory.create(healthStatus);
 
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Check System Health", cause);
             long totalDuration = System.currentTimeMillis() - startTime;
             logger.error("Health check failed with exception after {}ms: {}", totalDuration, cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.SetUpArea.HEALTHCHECK_REQUEST_FAILURE, 1);
@@ -248,6 +250,10 @@ public class SetUpArea {
                             "Timestamp", java.time.Instant.now().toString()
                     )
             );
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Check System Health");
+            }
         }
     }
 
@@ -267,7 +273,7 @@ public class SetUpArea {
             name = "Save Extension Configuration",
             description = "Save or update JIRA extension configuration settings including host URL, authentication credentials, and OAuth parameters. At least one authentication method (API Token or OAuth 2.0) must be provided.",
             area = "SetUp",
-            type = CatalogRequest.Type.CHANGE_SYSTEM)
+            type = CatalogRequest.Type.CHANGE_SYSTEM, tool = true)
     @Field.Boolean(name = "Configuration Saved", required = false, attributes = {@Attribute(name = "toolTip", value = "'Indicates whether the configuration was successfully saved and validated.'")}, options = {})
     @Field.Text(name = "Message", required = false, attributes = {@Attribute(name = "toolTip", value = "'Detailed message about the configuration save operation.'")}, options = {})
     @Field.Text(name = "Authentication Method", required = false, attributes = {@Attribute(name = "toolTip", value = "'The authentication method configured: OAuth 2.0 or API Token.'")}, options = {})
@@ -285,8 +291,16 @@ public class SetUpArea {
                 clientId != null && !clientId.isBlank(),
                 clientSecret != null && !clientSecret.isBlank());
 
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Save Extension Configuration");
+        boolean auditRecorded = false;
         try {
             telemetryMetrics.incrementCounter(TelemetryConstants.SetUpArea.SAVE_CONFIGURATION_REQUEST_TOTAL, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
+
             logger.debug("saveConfiguration: Recorded total request telemetry");
 
             // Get current attributes
@@ -369,6 +383,8 @@ public class SetUpArea {
             );
 
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Save Extension Configuration", cause);
             logger.error("saveConfiguration: Failed to save configuration - {}", cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.SetUpArea.SAVE_CONFIGURATION_REQUEST_FAILURE, 1);
             logger.debug("saveConfiguration: Recorded failure telemetry for exception");
@@ -376,6 +392,10 @@ public class SetUpArea {
             return ExtensionResponseFactory.create(cause,
                     "Failed to save configuration: " + cause.getMessage(),
                     ExtensionResponse.Error.ExceptionType.LOGIC_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Save Extension Configuration");
+            }
         }
     }
 }

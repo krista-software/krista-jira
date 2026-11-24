@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.services;
@@ -28,8 +28,11 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -38,11 +41,17 @@ public final class JiraIssue {
     public static final String FIELDS = "fields";
     public static final String KEY = "key";
     public static final String ID = "id";
+    public static final String UPDATED = "updated";
+    public static final String CREATED = "created";
     public final String id;
     public final String key;
     public final Object fields;
     public final Object renderedFields;
 
+    private static final DateTimeFormatter JIRA_DATE_FORMATTER = new DateTimeFormatterBuilder()
+            .append(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+            .appendPattern("[.SSS][Z][XXX][XX]")
+            .toFormatter();
 
     private final Logger LOGGER = LoggerFactory.getLogger(JiraIssue.class);
 
@@ -80,6 +89,8 @@ public final class JiraIssue {
             issue.parentKey = getParent();
             issue.labels = getLabels();
             issue.components = getComponents();
+            issue.createdDate = getCreatedDate();
+            issue.lastModifiedDate = getLastModifiedDate();
         } catch (Exception ignored) {
             return issue;
         }
@@ -406,6 +417,82 @@ public final class JiraIssue {
             return fields.getAsJsonObject("issuetype").get("name").getAsString();
         } catch (Exception ignored) {
             return "";
+        }
+    }
+
+    private Long getCreatedDate() {
+        if (this.fields == null) {
+            LOGGER.warn("Fields object is null, cannot extract Created Date");
+            return null;
+        }
+
+        JsonObject fieldsObj = (JsonObject) this.fields;
+        if (!fieldsObj.has(CREATED)) {
+            LOGGER.warn("'created' field not found in Jira response");
+            return null;
+        }
+
+        JsonElement createdElement = fieldsObj.get(CREATED);
+        if (createdElement == null || createdElement.isJsonNull()) {
+            LOGGER.warn("'created' field is null in Jira response");
+            return null;
+        }
+
+        try {
+            String createdStr = createdElement.getAsString();
+            LOGGER.trace("Parsing Created Date from Jira API: {}", createdStr);
+
+            OffsetDateTime offsetDateTime = OffsetDateTime.parse(createdStr, JIRA_DATE_FORMATTER);
+            Long epochMilli = offsetDateTime.toInstant().toEpochMilli();
+
+            LOGGER.debug("Successfully parsed Created Date: {} -> epoch: {}", createdStr, epochMilli);
+            return epochMilli;
+        } catch (DateTimeParseException e) {
+            LOGGER.error("Failed to parse Created Date. Invalid date format: {}",
+                    createdElement.getAsString(), e);
+            return null;
+        } catch (IllegalStateException | UnsupportedOperationException e) {
+            LOGGER.error("Failed to extract Created Date. Invalid JSON element type: {}",
+                    createdElement, e);
+            return null;
+        }
+    }
+
+    private Long getLastModifiedDate() {
+        if (this.fields == null) {
+            LOGGER.warn("Fields object is null, cannot extract Last Modified Date");
+            return null;
+        }
+
+        JsonObject fieldsObj = (JsonObject) this.fields;
+        if (!fieldsObj.has(UPDATED)) {
+            LOGGER.warn("'updated' field not found in Jira response");
+            return null;
+        }
+
+        JsonElement updatedElement = fieldsObj.get(UPDATED);
+        if (updatedElement == null || updatedElement.isJsonNull()) {
+            LOGGER.warn("'updated' field is null in Jira response");
+            return null;
+        }
+
+        try {
+            String updatedStr = updatedElement.getAsString();
+            LOGGER.trace("Parsing Last Modified Date from Jira API: {}", updatedStr);
+
+            OffsetDateTime offsetDateTime = OffsetDateTime.parse(updatedStr, JIRA_DATE_FORMATTER);
+            Long epochMilli = offsetDateTime.toInstant().toEpochMilli();
+
+            LOGGER.debug("Successfully parsed Last Modified Date: {} -> epoch: {}", updatedStr, epochMilli);
+            return epochMilli;
+        } catch (DateTimeParseException e) {
+            LOGGER.error("Failed to parse Last Modified Date. Invalid date format: {}",
+                    updatedElement.getAsString(), e);
+            return null;
+        } catch (IllegalStateException | UnsupportedOperationException e) {
+            LOGGER.error("Failed to extract Last Modified Date. Invalid JSON element type: {}",
+                    updatedElement, e);
+            return null;
         }
     }
 

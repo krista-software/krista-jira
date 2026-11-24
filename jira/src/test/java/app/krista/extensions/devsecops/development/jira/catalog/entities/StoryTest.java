@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -97,18 +97,21 @@ class StoryTest {
 
         // Assert
         assertNotNull(fieldMap);
-        assertEquals(11, fieldMap.size());
+        assertEquals(14, fieldMap.size());
         assertEquals("Test Story", fieldMap.get("Summary"));
         assertEquals(comments, fieldMap.get("Comments"));
         assertEquals("Reporter", fieldMap.get("Reporter Name"));
         assertEquals("Assignee", fieldMap.get("Assignee Name"));
         assertEquals("STORY-001", fieldMap.get("Story Key"));
         assertEquals("123", fieldMap.get("Id"));
+        assertNull(fieldMap.get("Parent Key"));
         assertEquals("TEST", fieldMap.get("Project Key"));
         assertEquals("Story Description", fieldMap.get("Description"));
         assertEquals("Story", fieldMap.get("Story Type"));
         assertEquals("Medium", fieldMap.get("Priority"));
         assertEquals("Done", fieldMap.get("Status"));
+        assertNull(fieldMap.get("Created Date"));
+        assertNull(fieldMap.get("Last Modified Date"));
     }
 
     @Test
@@ -119,18 +122,21 @@ class StoryTest {
         
         // Assert
         assertNotNull(fieldMap);
-        assertEquals(11, fieldMap.size());
+        assertEquals(14, fieldMap.size());
         assertNull(fieldMap.get("Summary"));
         assertNull(fieldMap.get("Comments"));
         assertNull(fieldMap.get("Reporter Name"));
         assertNull(fieldMap.get("Assignee Name"));
         assertNull(fieldMap.get("Story Key"));
         assertNull(fieldMap.get("Id"));
+        assertNull(fieldMap.get("Parent Key"));
         assertNull(fieldMap.get("Project Key"));
         assertNull(fieldMap.get("Description"));
         assertNull(fieldMap.get("Story Type"));
         assertNull(fieldMap.get("Priority"));
         assertNull(fieldMap.get("Status"));
+        assertNull(fieldMap.get("Created Date"));
+        assertNull(fieldMap.get("Last Modified Date"));
     }
 
     @Test
@@ -155,8 +161,8 @@ class StoryTest {
         // Assert
         List<String> expectedOrder = Arrays.asList(
             "Comments", "Summary", "Reporter Name", "Assignee Name",
-            "Story Type", "Story Key", "Id", "Project Key",
-            "Priority", "Status", "Description"
+            "Story Type", "Story Key", "Id", "Parent Key", "Project Key",
+            "Priority", "Status", "Description", "Created Date", "Last Modified Date"
         );
         List<String> actualOrder = Arrays.asList(fieldMap.keySet().toArray(new String[0]));
         assertEquals(expectedOrder, actualOrder);

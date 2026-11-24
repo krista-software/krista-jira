@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -102,18 +102,21 @@ class BugTest {
         
         // Assert
         assertNotNull(fieldMap);
-        assertEquals(11, fieldMap.size());
+        assertEquals(14, fieldMap.size());
         assertEquals("Test Summary", fieldMap.get("Summary"));
         assertEquals(comments, fieldMap.get("Comments"));
         assertEquals("Reporter", fieldMap.get("Reporter Name"));
         assertEquals("Assignee", fieldMap.get("Assignee Name"));
         assertEquals("BUG-001", fieldMap.get("Bug Key"));
         assertEquals("123", fieldMap.get("Id"));
+        assertNull(fieldMap.get("Parent Key"));
         assertEquals("TEST", fieldMap.get("Project Key"));
         assertEquals("Test Description", fieldMap.get("Description"));
         assertEquals("Bug", fieldMap.get("Type"));
         assertEquals("Medium", fieldMap.get("Priority"));
         assertEquals("In Progress", fieldMap.get("Status"));
+        assertNull(fieldMap.get("Created Date"));
+        assertNull(fieldMap.get("Last Modified Date"));
     }
 
     @Test
@@ -126,18 +129,21 @@ class BugTest {
         
         // Assert
         assertNotNull(fieldMap);
-        assertEquals(11, fieldMap.size());
+        assertEquals(14, fieldMap.size());
         assertNull(fieldMap.get("Summary"));
         assertNull(fieldMap.get("Comments"));
         assertNull(fieldMap.get("Reporter Name"));
         assertNull(fieldMap.get("Assignee Name"));
         assertNull(fieldMap.get("Bug Key"));
         assertNull(fieldMap.get("Id"));
+        assertNull(fieldMap.get("Parent Key"));
         assertNull(fieldMap.get("Project Key"));
         assertNull(fieldMap.get("Description"));
         assertNull(fieldMap.get("Type"));
         assertNull(fieldMap.get("Priority"));
         assertNull(fieldMap.get("Status"));
+        assertNull(fieldMap.get("Created Date"));
+        assertNull(fieldMap.get("Last Modified Date"));
     }
 
     @Test
@@ -195,9 +201,9 @@ class BugTest {
         
         // Assert - LinkedHashMap maintains insertion order
         List<String> expectedOrder = Arrays.asList(
-            "Summary", "Comments", "Reporter Name", "Assignee Name", 
-            "Bug Key", "Id", "Project Key", "Description", 
-            "Type", "Priority", "Status"
+            "Summary", "Comments", "Reporter Name", "Assignee Name",
+            "Bug Key", "Id", "Parent Key", "Project Key", "Description",
+            "Type", "Priority", "Status", "Created Date", "Last Modified Date"
         );
         List<String> actualOrder = Arrays.asList(fieldMap.keySet().toArray(new String[0]));
         assertEquals(expectedOrder, actualOrder);

@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog;
@@ -23,6 +23,8 @@ import app.krista.extension.executor.Invoker;
 import app.krista.extensions.devsecops.development.jira.JiraAttributes;
 import app.krista.extensions.devsecops.development.jira.authentication.RestClient;
 import app.krista.extensions.devsecops.development.jira.authentication.RestClientFactory;
+import app.krista.extensions.devsecops.development.jira.api.JiraAuditService;
+import app.krista.extensions.devsecops.development.jira.impl.IssueDao;
 import app.krista.extensions.devsecops.development.jira.util.TelemetryConstants;
 import app.krista.ksdk.context.AuthorizationContext;
 import app.krista.ksdk.context.RequestContext;
@@ -68,6 +70,12 @@ class SetUpAreaTest {
     private TelemetryMetrics telemetryMetrics;
 
     @Mock
+    private IssueDao issueDao;
+
+    @Mock
+    private JiraAuditService jiraAuditService;
+
+    @Mock
     private RestClient restClient;
 
     private SetUpArea setUpArea;
@@ -81,7 +89,9 @@ class SetUpAreaTest {
                 invoker,
                 requestContext,
                 authorizationContext,
-                telemetryMetrics
+                telemetryMetrics,
+                issueDao,
+                jiraAuditService
         );
     }
 
@@ -281,5 +291,144 @@ class SetUpAreaTest {
         verify(telemetryMetrics).incrementCounter(TelemetryConstants.SetUpArea.SAVE_CONFIGURATION_REQUEST_TOTAL, 1);
         verify(telemetryMetrics).incrementCounter(TelemetryConstants.SetUpArea.SAVE_CONFIGURATION_REQUEST_FAILURE, 1);
     }
-}
 
+    // ========================================
+    // Additional Health Check Coverage Tests
+    // ========================================
+
+    @Test
+    @DisplayName("Health check calls validateCredentials when invokeAsUser is true")
+    void testCheckSystemHealth_InvokeAsUser_CallsValidateCredentials() throws Exception {
+        when(requestContext.invokeAsUser()).thenReturn(true);
+        when(jiraAttributes.getHostUrl()).thenReturn("https://test.atlassian.net");
+        when(jiraAttributes.areOAuthCredentialsPresent()).thenReturn(true);
+        when(restClientFactory.getInstance()).thenReturn(restClient);
+        when(restClient.fetch(eq("project"), any(), eq(String.class))).thenReturn("[]");
+
+        ExtensionResponse result = setUpArea.checkSystemHealth();
+
+        assertNotNull(result);
+        verify(issueDao).validateCredentials();
+    }
+
+    @Test
+    @DisplayName("Health check returns UNHEALTHY when host URL is blank (not null)")
+    void testCheckSystemHealth_BlankHostUrl_ReturnsUnhealthy() {
+        when(jiraAttributes.getHostUrl()).thenReturn("   ");
+
+        ExtensionResponse result = setUpArea.checkSystemHealth();
+
+        assertNotNull(result);
+        verify(telemetryMetrics).incrementCounter(TelemetryConstants.SetUpArea.HEALTHCHECK_REQUEST_FAILURE, 1);
+    }
+
+    @Test
+    @DisplayName("Health check returns UNHEALTHY when credentials are not configured")
+    void testCheckSystemHealth_NoCredentials_ReturnsUnhealthy() {
+        when(jiraAttributes.getHostUrl()).thenReturn("https://test.atlassian.net");
+        when(jiraAttributes.areOAuthCredentialsPresent()).thenReturn(false);
+        // getUserName() and getAuthToken() return null by default (Mockito default)
+
+        ExtensionResponse result = setUpArea.checkSystemHealth();
+
+        assertNotNull(result);
+        verify(telemetryMetrics).incrementCounter(TelemetryConstants.SetUpArea.HEALTHCHECK_REQUEST_FAILURE, 1);
+        verify(restClientFactory, never()).getInstance();
+    }
+
+    @Test
+    @DisplayName("Health check with ISE containing 400 returns UNHEALTHY with bad-request message")
+    void testCheckSystemHealth_ApiIllegalState_400_ReturnsUnhealthy() {
+        when(jiraAttributes.getHostUrl()).thenReturn("https://test.atlassian.net");
+        when(jiraAttributes.areOAuthCredentialsPresent()).thenReturn(true);
+        when(restClientFactory.getInstance()).thenReturn(restClient);
+        when(restClient.fetch(eq("project"), any(), eq(String.class)))
+                .thenThrow(new IllegalStateException("400 Bad Request"));
+
+        ExtensionResponse result = setUpArea.checkSystemHealth();
+
+        assertNotNull(result);
+        verify(telemetryMetrics).incrementCounter(TelemetryConstants.SetUpArea.HEALTHCHECK_REQUEST_FAILURE, 1);
+    }
+
+    @Test
+    @DisplayName("Health check with ISE containing 404 returns UNHEALTHY with invalid-URL message")
+    void testCheckSystemHealth_ApiIllegalState_404_ReturnsUnhealthy() {
+        when(jiraAttributes.getHostUrl()).thenReturn("https://test.atlassian.net");
+        when(jiraAttributes.areOAuthCredentialsPresent()).thenReturn(true);
+        when(restClientFactory.getInstance()).thenReturn(restClient);
+        when(restClient.fetch(eq("project"), any(), eq(String.class)))
+                .thenThrow(new IllegalStateException("404 Not Found"));
+
+        ExtensionResponse result = setUpArea.checkSystemHealth();
+
+        assertNotNull(result);
+        verify(telemetryMetrics).incrementCounter(TelemetryConstants.SetUpArea.HEALTHCHECK_REQUEST_FAILURE, 1);
+    }
+
+    @Test
+    @DisplayName("Health check with ISE containing generic error message returns UNHEALTHY")
+    void testCheckSystemHealth_ApiIllegalState_GenericError_ReturnsUnhealthy() {
+        when(jiraAttributes.getHostUrl()).thenReturn("https://test.atlassian.net");
+        when(jiraAttributes.areOAuthCredentialsPresent()).thenReturn(true);
+        when(restClientFactory.getInstance()).thenReturn(restClient);
+        when(restClient.fetch(eq("project"), any(), eq(String.class)))
+                .thenThrow(new IllegalStateException("Connection refused"));
+
+        ExtensionResponse result = setUpArea.checkSystemHealth();
+
+        assertNotNull(result);
+        verify(telemetryMetrics).incrementCounter(TelemetryConstants.SetUpArea.HEALTHCHECK_REQUEST_FAILURE, 1);
+    }
+
+    @Test
+    @DisplayName("Health check triggers outer catch when telemetry throws")
+    void testCheckSystemHealth_TelemetryThrows_OuterCatchHandled() {
+        doThrow(new RuntimeException("Metrics unavailable"))
+                .when(telemetryMetrics).incrementCounter(TelemetryConstants.SetUpArea.HEALTHCHECK_REQUEST_TOTAL, 1);
+
+        ExtensionResponse result = setUpArea.checkSystemHealth();
+
+        assertNotNull(result);
+        verify(jiraAuditService).failure(isNull(), eq("Check System Health"), any(RuntimeException.class));
+    }
+
+    // ========================================
+    // Additional Save Configuration Coverage Tests
+    // ========================================
+
+    @Test
+    @DisplayName("Save configuration calls validateCredentials when invokeAsUser is true")
+    void testSaveConfiguration_InvokeAsUser_CallsValidateCredentials() {
+        when(requestContext.invokeAsUser()).thenReturn(true);
+        Map<String, Object> currentAttributes = new HashMap<>();
+        when(invoker.getAttributes()).thenReturn(currentAttributes);
+        doNothing().when(jiraAttributes).validateAttributes(any());
+        when(jiraAttributes.areOAuthCredentialsPresent()).thenReturn(true);
+
+        ExtensionResponse result = setUpArea.saveConfiguration(
+                "https://new.atlassian.net", null, null, null, null);
+
+        assertNotNull(result);
+        verify(issueDao).validateCredentials();
+    }
+
+    @Test
+    @DisplayName("Save configuration with all null parameters still calls validation and update")
+    void testSaveConfiguration_AllNullParams_ValidationAndUpdate() {
+        Map<String, Object> currentAttributes = new HashMap<>();
+        when(invoker.getAttributes()).thenReturn(currentAttributes);
+        doNothing().when(jiraAttributes).validateAttributes(any());
+        when(jiraAttributes.areOAuthCredentialsPresent()).thenReturn(false);
+
+        ExtensionResponse result = setUpArea.saveConfiguration(null, null, null, null, null);
+
+        assertNotNull(result);
+        assertEquals(ExtensionResponse.Result.SUCCESS, result.getResult());
+        verify(jiraAttributes).update(any());
+        verify(jiraAttributes, never()).update(argThat(map ->
+                map.containsKey(JiraAttributes.HOST_URL)
+                        || map.containsKey(JiraAttributes.USER_NAME)));
+    }
+
+}

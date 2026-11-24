@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog;
@@ -24,8 +24,11 @@ import app.krista.extensions.devsecops.development.jira.catalog.errorhandlers.Er
 import app.krista.extensions.devsecops.development.jira.catalog.errorhandlers.ExtensionResponseGenerator;
 import app.krista.extensions.devsecops.development.jira.catalog.validators.ValidationOrchestrator;
 import app.krista.extensions.devsecops.development.jira.catalog.validators.Validator;
+import app.krista.extensions.devsecops.development.jira.api.JiraAuditService;
+import app.krista.extensions.devsecops.development.jira.impl.IssueDao;
 import app.krista.extensions.devsecops.development.jira.impl.ReleaseDao;
 import app.krista.extensions.devsecops.development.jira.services.ReleaseSummaryResponse;
+import app.krista.ksdk.context.RequestContext;
 import app.krista.ksdk.telemetry.TelemetryMetrics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -65,13 +68,23 @@ class ReleaseManagementAreaTest {
     @Mock
     private ExtensionResponseGenerator responseGenerator;
 
+    @Mock
+    private IssueDao issueDao;
+
+    @Mock
+    private RequestContext requestContext;
+
+    @Mock
+    private JiraAuditService jiraAuditService;
+
     private ReleaseManagementArea releaseManagementArea;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        releaseManagementArea = new ReleaseManagementArea(releaseDao, telemetryMetrics,
-                validationOrchestrator, internalStateManager, responseGenerator);
+        releaseManagementArea = new ReleaseManagementArea(releaseDao, issueDao, telemetryMetrics,
+                validationOrchestrator, internalStateManager, responseGenerator,
+                requestContext, jiraAuditService);
     }
 
     @Test
@@ -322,5 +335,66 @@ class ReleaseManagementAreaTest {
         assertNotNull(response);
         verify(releaseDao).getGetReleaseSummaryResponse(status, assignee, priority, issueType, 1000L, 5L, fixVersion);
     }
-}
 
+    @Test
+    @DisplayName("Should call validateCredentials when invokeAsUser is true")
+    void testGetReleaseSummary_InvokeAsUser_CallsValidateCredentials() {
+        when(requestContext.invokeAsUser()).thenReturn(true);
+
+        ReleaseSummaryResponse mockResponse = new ReleaseSummaryResponse();
+        mockResponse.setUserStories(new ArrayList<>());
+        mockResponse.setEpics(new ArrayList<>());
+        mockResponse.setBugs(new ArrayList<>());
+        mockResponse.setTasks(new ArrayList<>());
+
+        when(validationOrchestrator.validate(anyMap())).thenReturn(Collections.emptyList());
+        when(releaseDao.getGetReleaseSummaryResponse(any(), any(), any(), any(), anyLong(), anyLong(), any()))
+                .thenReturn(mockResponse);
+
+        ExtensionResponse response = releaseManagementArea.getReleaseSummary(
+                null, null, null, null, null, null, null);
+
+        assertNotNull(response);
+        verify(issueDao).validateCredentials();
+    }
+
+    @Test
+    @DisplayName("Should validate status when non-null and non-empty")
+    void testGetReleaseSummary_StatusValidated_WhenProvided() {
+        // status is non-null but blank — should NOT be added to validation map
+        // (covers the false branch of "status != null && !status.isEmpty()")
+        ReleaseSummaryResponse mockResponse = new ReleaseSummaryResponse();
+        mockResponse.setUserStories(new ArrayList<>());
+        mockResponse.setEpics(new ArrayList<>());
+        mockResponse.setBugs(new ArrayList<>());
+        mockResponse.setTasks(new ArrayList<>());
+
+        when(validationOrchestrator.validate(anyMap())).thenReturn(Collections.emptyList());
+        when(releaseDao.getGetReleaseSummaryResponse(any(), any(), any(), any(), anyLong(), anyLong(), any()))
+                .thenReturn(mockResponse);
+
+        // Empty status string — condition (status != null && !status.isEmpty()) is false
+        ExtensionResponse response = releaseManagementArea.getReleaseSummary(
+                "", null, null, "", 20.0, 1.0, null);
+
+        assertNotNull(response);
+        // Verify validationOrchestrator called with empty map (nothing added)
+        verify(validationOrchestrator).validate(argThat(map -> !map.containsKey(Validator.ValidationResource.STATUS_NAME)));
+    }
+
+    @Test
+    @DisplayName("Should record audit failure and re-throw on exception")
+    void testGetReleaseSummary_AuditFailureRecorded_OnException() {
+        when(requestContext.getInvokerId()).thenReturn("inv-test");
+        when(validationOrchestrator.validate(anyMap())).thenThrow(new RuntimeException("Validation service down"));
+
+        ExtensionResponse response = releaseManagementArea.getReleaseSummary(
+                "Open", null, null, null, 20.0, 1.0, null);
+
+        assertNotNull(response);
+        verify(jiraAuditService).triggered("inv-test", "Get release summary");
+        verify(jiraAuditService).failure(eq("inv-test"), eq("Get release summary"), any(RuntimeException.class));
+        verify(jiraAuditService, never()).success(anyString(), anyString());
+    }
+
+}

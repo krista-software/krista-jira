@@ -13,32 +13,28 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.util;
 
 import app.krista.extensions.util.KeyValueStore;
+import app.krista.sdk.atlassian.oauth.KeyValueRefreshTokenStore;
 import org.jvnet.hk2.annotations.Service;
 
 import javax.inject.Inject;
 
+/**
+ * HK2 service wrapper around the shared {@link KeyValueRefreshTokenStore}.
+ * Kept so existing injection points (and the legacy
+ * {@code storeRefToken}/{@code getRefToken} aliases) remain valid.
+ */
 @Service
-public final class SessionManager {
-
-    private final KeyValueStore keyValueStore;
+public final class SessionManager extends KeyValueRefreshTokenStore {
 
     @Inject
     public SessionManager(KeyValueStore keyValueStore) {
-        this.keyValueStore = keyValueStore;
-    }
-
-    public void storeRefToken(String key, String refToken) {
-        keyValueStore.put(key, refToken);
-    }
-
-    public String getRefToken(String refTokenKeyWord) {
-        return keyValueStore.get(refTokenKeyWord, String.class);
+        super(keyValueStore);
     }
 
 }

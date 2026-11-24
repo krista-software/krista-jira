@@ -13,11 +13,12 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.util;
 
+import app.krista.sdk.atlassian.util.DatePlus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import static org.junit.jupiter.api.Assertions.*;
@@ -247,16 +248,90 @@ class DatePlusTest {
     void testGetISODate_MultipleCalls_ReturnsConsistentResults() {
         // Arrange
         Date testDate = new Date(1609459200000L); // January 1, 2021, 00:00:00 UTC
-        
+
         // Act
         String result1 = DatePlus.getISODate(testDate);
         String result2 = DatePlus.getISODate(testDate);
         String result3 = DatePlus.getISODate(testDate);
-        
+
         // Assert
         assertEquals(result1, result2, "Multiple calls should return identical results");
         assertEquals(result2, result3, "Multiple calls should return identical results");
-        assertEquals("2021-01-01T00:00:00.000+0000", result1, 
+        assertEquals("2021-01-01T00:00:00.000+0000", result1,
                     "Should return consistent ISO format");
+    }
+
+    // ========== toJqlDate() — epoch millis ==========
+
+    @Test
+    @DisplayName("toJqlDate: epoch millis converted to JQL date format (yyyy/MM/dd HH:mm UTC)")
+    void testToJqlDate_EpochMillis_ConvertsToJqlFormat() {
+        String result = DatePlus.toJqlDate("1710511845000");
+        assertNotNull(result);
+        assertTrue(result.startsWith("2024/03/15"), "Should convert epoch to yyyy/MM/dd: " + result);
+        assertTrue(result.matches("\\d{4}/\\d{2}/\\d{2} \\d{2}:\\d{2}"), "Should match JQL date format: " + result);
+    }
+
+    @Test
+    @DisplayName("toJqlDate: epoch zero converts to 1970/01/01")
+    void testToJqlDate_EpochZero() {
+        String result = DatePlus.toJqlDate("0");
+        assertNotNull(result);
+        assertEquals("1970/01/01 00:00", result);
+    }
+
+    // ========== toJqlDate() — ISO-8601 strings ==========
+
+    @Test
+    @DisplayName("toJqlDate: ISO-8601 datetime converted to JQL date format")
+    void testToJqlDate_IsoDatetime() {
+        String result = DatePlus.toJqlDate("2025-06-15T10:30:00Z");
+        assertNotNull(result);
+        assertEquals("2025/06/15 10:30", result);
+    }
+
+    @Test
+    @DisplayName("toJqlDate: ISO-8601 with timezone offset converted to UTC")
+    void testToJqlDate_IsoWithOffset() {
+        // +05:30 offset: 10:30 local = 05:00 UTC
+        String result = DatePlus.toJqlDate("2025-06-15T10:30:00+05:30");
+        assertNotNull(result);
+        assertEquals("2025/06/15 05:00", result);
+    }
+
+    // ========== toJqlDate() — edge cases ==========
+
+    @Test
+    @DisplayName("toJqlDate: null input returns null")
+    void testToJqlDate_Null_ReturnsNull() {
+        assertNull(DatePlus.toJqlDate(null));
+    }
+
+    @Test
+    @DisplayName("toJqlDate: blank input returns blank")
+    void testToJqlDate_Blank_ReturnsBlank() {
+        assertEquals("  ", DatePlus.toJqlDate("  "));
+    }
+
+    @Test
+    @DisplayName("toJqlDate: non-date string returns as-is")
+    void testToJqlDate_NonDateString_ReturnsAsIs() {
+        assertEquals("not-a-date", DatePlus.toJqlDate("not-a-date"));
+    }
+
+    @Test
+    @DisplayName("toJqlDate: already JQL-format date returns as-is")
+    void testToJqlDate_AlreadyJqlFormat_ReturnsAsIs() {
+        assertEquals("2025/06/15 10:30", DatePlus.toJqlDate("2025/06/15 10:30"));
+    }
+
+    @Test
+    @DisplayName("toJqlDate: Instant.parse fallback — ISO instant without offset")
+    void testToJqlDate_InstantParseFallback() {
+        // "2025-06-15T10:30:00Z" is handled by ZonedDateTime, but truncated instant format
+        // triggers Instant.parse path
+        String result = DatePlus.toJqlDate("2025-06-15T10:30:00.000Z");
+        assertNotNull(result);
+        assertEquals("2025/06/15 10:30", result);
     }
 }

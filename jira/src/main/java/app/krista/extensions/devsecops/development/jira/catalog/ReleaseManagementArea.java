@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog;
@@ -24,14 +24,17 @@ import app.krista.extension.impl.anno.CatalogRequest;
 import app.krista.extension.impl.anno.Domain;
 import app.krista.extension.impl.anno.Field;
 import app.krista.extensions.devsecops.development.jira.util.TelemetryConstants;
+import app.krista.extensions.devsecops.development.jira.api.JiraAuditService;
 import app.krista.extensions.devsecops.development.jira.catalog.errorhandlers.ErrorHandlingStateManager;
 import app.krista.extensions.devsecops.development.jira.catalog.errorhandlers.ExtensionResponseGenerator;
-import app.krista.extensions.devsecops.development.jira.catalog.extresp.ExtensionResponseFactory;
+import app.krista.sdk.atlassian.extresp.ExtensionResponseFactory;
 import app.krista.extensions.devsecops.development.jira.catalog.validators.ValidationOrchestrator;
 import app.krista.extensions.devsecops.development.jira.catalog.validators.Validator;
+import app.krista.extensions.devsecops.development.jira.impl.IssueDao;
 import app.krista.extensions.devsecops.development.jira.impl.ReleaseDao;
 import app.krista.extensions.devsecops.development.jira.services.ReleaseSummaryResponse;
 import app.krista.extensions.devsecops.development.jira.util.JiraConstants;
+import app.krista.ksdk.context.RequestContext;
 import app.krista.ksdk.telemetry.TelemetryMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,22 +53,29 @@ import java.util.UUID;
 public final class ReleaseManagementArea {
 
     private final ReleaseDao releaseDao;
+    private final IssueDao issueDao;
     private final TelemetryMetrics telemetryMetrics;
     private final ValidationOrchestrator validationOrchestrator;
     private final ErrorHandlingStateManager internalStateManager;
     private final ExtensionResponseGenerator responseGenerator;
+    private final RequestContext requestContext;
+    private final JiraAuditService jiraAuditService;
     private final Logger logger = LoggerFactory.getLogger(ReleaseManagementArea.class);
 
     @Inject
-    public ReleaseManagementArea(ReleaseDao releaseDao, TelemetryMetrics telemetryMetrics,
+    public ReleaseManagementArea(ReleaseDao releaseDao, IssueDao issueDao, TelemetryMetrics telemetryMetrics,
                                  ValidationOrchestrator validationOrchestrator,
                                  ErrorHandlingStateManager internalStateManager,
-                                 ExtensionResponseGenerator responseGenerator) {
+                                 ExtensionResponseGenerator responseGenerator,
+                                 RequestContext requestContext, JiraAuditService jiraAuditService) {
         this.releaseDao = releaseDao;
+        this.issueDao = issueDao;
         this.telemetryMetrics = telemetryMetrics;
         this.validationOrchestrator = validationOrchestrator;
         this.internalStateManager = internalStateManager;
         this.responseGenerator = responseGenerator;
+        this.requestContext = requestContext;
+        this.jiraAuditService = jiraAuditService;
     }
 
     @CatalogRequest(
@@ -73,7 +83,7 @@ public final class ReleaseManagementArea {
             name = "Get release summary",
             description = "Retrieves a summary of releases filtered by various issue fields.",
             area = "Release Management",
-            type = CatalogRequest.Type.QUERY_SYSTEM)
+            type = CatalogRequest.Type.QUERY_SYSTEM, tool = true)
     @Field(name = "Total user stories", type = "Number", attributes = {@Attribute(name = "toolTip", value = "'Total count of user stories in the release.'")}, options = {})
     @Field(name = "Open user stories", type = "Number", attributes = {@Attribute(name = "toolTip", value = "'Number of user stories that are still open and need completion.'")}, options = {})
     @Field(name = "Total epics", type = "Number", attributes = {@Attribute(name = "toolTip", value = "'Total count of epics included in the release.'")}, options = {})
@@ -95,9 +105,16 @@ public final class ReleaseManagementArea {
             @Field(name = "Page Size", type = "Number", attributes = {@Attribute(name = "toolTip", value = "'Number of results to display per page (default: 20).'")}, options = {}) Double pageSize,
             @Field(name = "Page Number", type = "Number", attributes = {@Attribute(name = "toolTip", value = "'Page number to retrieve (default: 1).'")}, options = {}) Double pageNumber,
             @Field.Text(name = "Fix version", attributes = {@Attribute(name = "toolTip", value = "'Filter issues by fix version to see what will be included in a specific release.'")}, options = {}) String fixVersion) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Get release summary");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.ReleaseManagementArea.GET_RELEASE_SUMMARY_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             // Build validation map for provided parameters
             Map<Validator.ValidationResource, String> validationMap = new HashMap<>();
@@ -153,10 +170,16 @@ public final class ReleaseManagementArea {
                 return response;
             }
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get release summary", cause);
             logger.error("Error occurred while getting release summary :{}", cause.getMessage());
             telemetryMetrics.incrementCounter(TelemetryConstants.ReleaseManagementArea.GET_RELEASE_SUMMARY_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause, "Error occurred while getting release summary.",
                     ExtensionResponse.Error.ExceptionType.LOGIC_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Get release summary");
+            }
         }
     }
 

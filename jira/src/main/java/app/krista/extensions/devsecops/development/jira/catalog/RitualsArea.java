@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog;
@@ -24,20 +24,23 @@ import app.krista.extension.impl.anno.Attribute;
 import app.krista.extension.impl.anno.CatalogRequest;
 import app.krista.extension.impl.anno.Domain;
 import app.krista.extension.impl.anno.Field;
+import app.krista.extensions.devsecops.development.jira.api.JiraAuditService;
 import app.krista.extensions.devsecops.development.jira.util.TelemetryConstants;
 import app.krista.extensions.devsecops.development.jira.catalog.entities.Issue;
 import app.krista.extensions.devsecops.development.jira.catalog.entities.TicketPriority;
 import app.krista.extensions.devsecops.development.jira.catalog.errorhandlers.ErrorHandlingStateManager;
 import app.krista.extensions.devsecops.development.jira.catalog.errorhandlers.ExtensionResponseGenerator;
-import app.krista.extensions.devsecops.development.jira.catalog.extresp.ExtensionResponseFactory;
+import app.krista.sdk.atlassian.extresp.ExtensionResponseFactory;
 import app.krista.extensions.devsecops.development.jira.catalog.extresp.JiraResources;
-import app.krista.extensions.devsecops.development.jira.catalog.extresp.RemediationActionFactory;
+import app.krista.sdk.atlassian.extresp.RemediationActionFactory;
 import app.krista.extensions.devsecops.development.jira.catalog.validators.ValidationOrchestrator;
 import app.krista.extensions.devsecops.development.jira.catalog.validators.Validator;
 import app.krista.extensions.devsecops.development.jira.impl.IssueDao;
-import app.krista.extensions.devsecops.development.jira.impl.JQLBuilder;
+import app.krista.sdk.atlassian.jql.JQLBuilder;
 import app.krista.extensions.devsecops.development.jira.impl.ProjectDao;
+import app.krista.extensions.devsecops.development.jira.impl.UserDao;
 import app.krista.extensions.devsecops.development.jira.impl.WebhookDao;
+import app.krista.extensions.devsecops.development.jira.services.JiraUser;
 import app.krista.extensions.devsecops.development.jira.util.FieldValidator;
 import app.krista.extensions.devsecops.development.jira.util.JiraConstants;
 import app.krista.extensions.util.EventHandler;
@@ -70,6 +73,7 @@ public final class RitualsArea {
     public static final String IS_ERROR = "IsError";
     public static final String LIST_OF_ISSUES = "List of Issues";
     private final IssueDao issueDao;
+    private final UserDao userDao;
     private final RequestContext requestContext;
     private final AuthorizationContext authorizationContext;
     private final EventHandler eventHandler;
@@ -77,13 +81,18 @@ public final class RitualsArea {
     private final ErrorHandlingStateManager internalStateManager;
     private final ExtensionResponseGenerator responseGenerator;
     private final TelemetryMetrics telemetryMetrics;
+    private final JiraAuditService jiraAuditService;
     ExecutorService executorService = Executors.newSingleThreadExecutor();
     private static final Logger LOGGER = LoggerFactory.getLogger(RitualsArea.class);
     private final ProjectDao projectDao;
 
     @Inject
-    public RitualsArea(IssueDao issueDao, RequestContext requestContext, AuthorizationContext authorizationContext, EventHandler eventHandler, ValidationOrchestrator validationOrchestrator, ErrorHandlingStateManager internalStateManager, ExtensionResponseGenerator responseGenerator, ProjectDao projectDao, TelemetryMetrics telemetryMetrics) {
+    public RitualsArea(IssueDao issueDao, UserDao userDao, RequestContext requestContext, AuthorizationContext authorizationContext,
+                       EventHandler eventHandler, ValidationOrchestrator validationOrchestrator,
+                       ErrorHandlingStateManager internalStateManager, ExtensionResponseGenerator responseGenerator,
+                       ProjectDao projectDao, TelemetryMetrics telemetryMetrics, JiraAuditService jiraAuditService) {
         this.issueDao = issueDao;
+        this.userDao = userDao;
         this.requestContext = requestContext;
         this.authorizationContext = authorizationContext;
         this.eventHandler = eventHandler;
@@ -92,6 +101,7 @@ public final class RitualsArea {
         this.responseGenerator = responseGenerator;
         this.projectDao = projectDao;
         this.telemetryMetrics = telemetryMetrics;
+        this.jiraAuditService = jiraAuditService;
     }
 
     @CatalogRequest(
@@ -99,14 +109,21 @@ public final class RitualsArea {
             name = "Update status of multiple issues",
             description = "Update the status for multiple Jira issues simultaneously to streamline workflow management and bulk operations.",
             area = "Rituals",
-            type = CatalogRequest.Type.CHANGE_SYSTEM)
+            type = CatalogRequest.Type.CHANGE_SYSTEM, tool = true)
     @Field.Desc(name = "Updated issues", type = "[ Entity(Issue) ]", required = false)
     public ExtensionResponse updateStatusOfMultipleIssues(
             @Field.Text(name = "Status Name", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the new status to apply to all selected issues (e.g., In Progress, Done, Closed).'")}, options = {}) String statusName,
             @Field.Desc(name = "Issue Key", type = "[ Text ]") List<String> issueKey) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Update status of multiple issues");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_STATUS_OF_MULTIPLE_ISSUES_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             // Validate using enhanced validation with field extraction
             String issueKeysJson = GSON_BUILDER.toJson(issueKey);
@@ -149,18 +166,28 @@ public final class RitualsArea {
                 return response;
             }
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Update status of multiple issues", cause);
             LOGGER.error("Authorization failed for updateStatusOfMultipleIssues: {}", cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_STATUS_OF_MULTIPLE_ISSUES_REQUEST_FAILURE, 1);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Update status of multiple issues", cause);
             LOGGER.error("Illegal caller for updateStatusOfMultipleIssues: {}", cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_STATUS_OF_MULTIPLE_ISSUES_REQUEST_FAILURE, 1);
             throw new RuntimeException("Invalid caller for update status operation", cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Update status of multiple issues", cause);
             LOGGER.error("Unexpected error updating multiple issues: {}", cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_STATUS_OF_MULTIPLE_ISSUES_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause, "Error occurred while updating multiple issues",
                     ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Update status of multiple issues");
+            }
         }
     }
 
@@ -169,16 +196,23 @@ public final class RitualsArea {
             name = "Add a comment",
             description = "Add a comment to a specific Jira issue or task to provide updates, feedback, or additional information for team collaboration.",
             area = "Rituals",
-            type = CatalogRequest.Type.CHANGE_SYSTEM)
+            type = CatalogRequest.Type.CHANGE_SYSTEM, tool = true)
     @Field.Boolean(name = "Is successful", required = false, attributes = {@Attribute(name = "toolTip", value = "'Confirmation indicating whether the comment was successfully added to the issue.'")}, options = {})
     public ExtensionResponse addAComment(
             @Field(name = "Comment", type = "Paragraph",required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter your comment text. You can provide updates, feedback, or any relevant information about the issue.'")}, options = {}) String comment,
             @Field.Text(name = "Issue Key", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the issue key where you want to add the comment (e.g., PROJ-123).'")}, options = {}) String issueKey,
             @Field.PickOne(name = "Comment Visibility", values = {"Public", "Internal"}, required = false,
                     attributes = {@Attribute(name = "visualWidth", value = "S"), @Attribute(name = "toolTip", value = "'Choose comment visibility: Public (visible to all users) or Internal (visible only to team members).'")}, options = {}) String commentVisibility) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Add a comment");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ADD_COMMENT_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             List<ValidationOrchestrator.ValidationResult> validationResults =
                     validationOrchestrator.validate(Map.of(Validator.ValidationResource.TICKET_ID, issueKey));
@@ -211,14 +245,26 @@ public final class RitualsArea {
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ADD_COMMENT_REQUEST_SUCCESS, 1);
             return response;
         } catch (MustAuthorizeException | IllegalCallerException cause) {
+            auditRecorded = true;
+            if (cause instanceof MustAuthorizeException) {
+                jiraAuditService.authFailure(invokerId, "Add a comment", cause);
+            } else {
+                jiraAuditService.failure(invokerId, "Add a comment", cause);
+            }
             LOGGER.error("Failed to add comment to issue {}: {}", issueKey, cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ADD_COMMENT_REQUEST_FAILURE, 1);
             throw cause instanceof MustAuthorizeException ? (MustAuthorizeException) cause : new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Add a comment", cause);
             LOGGER.error("Unexpected error adding comment to issue {}: {}", issueKey, cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ADD_COMMENT_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause, "Error occurred while adding comment in issue",
                     ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Add a comment");
+            }
         }
     }
 
@@ -227,13 +273,20 @@ public final class RitualsArea {
             name = "Get user issues",
             description = "Retrieve all issues associated with a specific user account to track their workload and assigned tasks.",
             area = "Rituals",
-            type = CatalogRequest.Type.QUERY_SYSTEM)
+            type = CatalogRequest.Type.QUERY_SYSTEM, tool = true)
     @Field.Desc(name = "User Issues", type = "[ Entity(Issue) ]", required = false)
     public ExtensionResponse getUserIssues(
             @Field.Text(name = "User Account Id", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the unique account ID of the user whose issues you want to retrieve.'")}, options = {}) String userAccountId) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Get user issues");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_USER_ISSUES_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             List<ValidationOrchestrator.ValidationResult> validationResults =
                     validationOrchestrator.validate(Map.of(Validator.ValidationResource.USER_ID, userAccountId));
@@ -256,18 +309,112 @@ public final class RitualsArea {
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_USER_ISSUES_REQUEST_SUCCESS, 1);
             return response;
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Get user issues", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_USER_ISSUES_REQUEST_FAILURE, 1);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get user issues", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_USER_ISSUES_REQUEST_FAILURE, 1);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get user issues", cause);
             LOGGER.error("Error occurred while get issues by user account Id :{}", cause.getMessage());
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_USER_ISSUES_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause, "Error occurred while get issues by user account Id",
                     ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Get user issues");
+            }
+        }
+    }
+
+    @CatalogRequest(
+            id = "localDomainRequest_c7a4f0e2-9b3d-4e51-8a6c-2f7d1b9e0a34",
+            name = "Get issues by user names",
+            description = "Look up the Jira issues currently ASSIGNED to one or more people, identified by name rather than by Jira account ID. "
+                    + "Use this when the request mentions people by their display name, full name, or username (for example \"show me the open tickets for Alice and Bob\", "
+                    + "\"what is John working on\", or \"list issues assigned to these team members\") and you do NOT already have their Jira account IDs. "
+                    + "Provide the list of names in the 'User Names' input; this request resolves each name to its Jira account(s) for you, so no prior account-ID lookup is needed. "
+                    + "It searches on ASSIGNEE only (not reporter, watcher, or creator). "
+                    + "Behavior: a name that matches more than one Jira user includes the issues of ALL matching users; names that match no user are skipped; if none of the names match any user, an empty list is returned instead of an error. "
+                    + "Returns a single combined list of issues across everyone named, ordered by priority (highest first) then due date, capped at 30 issues. "
+                    + "If you already have a Jira account ID and want a single user's issues, use \"Get user issues\" instead; to find someone's account ID, use \"Get Users Account Id\".",
+            area = "Rituals",
+            type = CatalogRequest.Type.QUERY_SYSTEM, tool = true)
+    @Field.Desc(name = "Issues", type = "[ Entity(Issue) ]", required = false,
+            description = "The combined list of Jira issues assigned to the named users. Each entry is a full Issue entity (key, summary, status, priority, assignee, due date, etc.). Empty if none of the given names match a Jira user or the matched users have no assigned issues.")
+    public ExtensionResponse getIssuesByUserNames(
+            @Field.Desc(name = "User Names", type = "[ Text ]", required = true,
+                    description = "The people whose assigned Jira issues you want, given as a list of names — display name, full name, or username (email or account ID also work, since they are matched the same way). "
+                            + "Provide one entry per person, e.g. [\"Alice Smith\", \"Bob\", \"jdoe\"]. Partial names are allowed and may match several users, in which case all matching users' issues are included. "
+                            + "Do not pass a single comma-separated string; use a proper list with one name per element. At least one name is required.")
+            List<String> userNames) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Get issues by user names");
+        boolean auditRecorded = false;
+        try {
+            telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUES_BY_USER_NAMES_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
+
+            // Resolve every name to its Jira account id(s). An ambiguous name (multiple
+            // matches) contributes all of its account ids; a name matching nobody contributes
+            // nothing. Order is preserved and duplicates across names are collapsed.
+            Set<String> accountIds = new LinkedHashSet<>();
+            if (userNames != null) {
+                for (String name : userNames) {
+                    if (name == null || name.isBlank()) {
+                        continue;
+                    }
+                    for (JiraUser user : userDao.searchUser(name.trim())) {
+                        if (user.accountId != null && !user.accountId.isBlank()) {
+                            accountIds.add(user.accountId);
+                        }
+                    }
+                }
+            }
+
+            if (accountIds.isEmpty()) {
+                // No name resolved to a user — return an empty list rather than an error.
+                telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUES_BY_USER_NAMES_REQUEST_SUCCESS, 1);
+                return ExtensionResponseFactory.create(Map.of("Issues", new ArrayList<Issue>()));
+            }
+
+            String jql = " assignee in (" + String.join(", ", accountIds) + ") order by priority DESC, duedate DESC";
+            List<Issue> issues = issueDao.searchByJQL(jql, 30, 1);
+            telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUES_BY_USER_NAMES_REQUEST_SUCCESS, 1);
+            return ExtensionResponseFactory.create(Map.of("Issues", issues));
+        } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Get issues by user names", cause);
+            LOGGER.error(cause.getMessage(), cause);
+            telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUES_BY_USER_NAMES_REQUEST_FAILURE, 1);
+            throw cause;
+        } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get issues by user names", cause);
+            LOGGER.error(cause.getMessage(), cause);
+            telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUES_BY_USER_NAMES_REQUEST_FAILURE, 1);
+            throw new RuntimeException(cause.getMessage(), cause);
+        } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get issues by user names", cause);
+            LOGGER.error("Error occurred while getting issues by user names :{}", cause.getMessage());
+            telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUES_BY_USER_NAMES_REQUEST_FAILURE, 1);
+            return ExtensionResponseFactory.create(cause, "Error occurred while getting issues by user names",
+                    ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Get issues by user names");
+            }
         }
     }
 
@@ -276,14 +423,21 @@ public final class RitualsArea {
             name = "Update status of issue",
             description = "Change the status of a specific Jira issue to reflect its current progress in the workflow (e.g., from 'To Do' to 'In Progress').",
             area = "Rituals",
-            type = CatalogRequest.Type.CHANGE_SYSTEM)
+            type = CatalogRequest.Type.CHANGE_SYSTEM, tool = true)
     @Field.Desc(name = "Updated Issue", type = "Entity(Issue)", required = false)
     public ExtensionResponse updateStatusOfIssue(
             @Field.Text(name = "Issue Key", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the key of the issue whose status you want to update (e.g., PROJ-123).'")}, options = {}) String issueKey,
             @Field.Text(name = "Status Name", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the new status name (e.g., In Progress, Done, Closed, Testing).'")}, options = {}) String statusName) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Update status of issue");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_STATUS_OF_ISSUE_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             List<ValidationOrchestrator.ValidationResult> validationResults =
                     validationOrchestrator.validate(Map.of(Validator.ValidationResource.TICKET_ID, issueKey));
@@ -311,18 +465,28 @@ public final class RitualsArea {
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_STATUS_OF_ISSUE_REQUEST_SUCCESS, 1);
             return response;
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Update status of issue", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_STATUS_OF_ISSUE_REQUEST_FAILURE, 1);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Update status of issue", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_STATUS_OF_ISSUE_REQUEST_FAILURE, 1);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Update status of issue", cause);
             LOGGER.error("Error occurred while updating status of issue :{}", cause.getMessage());
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_STATUS_OF_ISSUE_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause, "Error occurred while updating status of issue",
                     ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Update status of issue");
+            }
         }
     }
 
@@ -331,14 +495,21 @@ public final class RitualsArea {
             name = "Assign a task to user",
             description = "Assign a Jira task or issue to a specific user to delegate work and ensure clear ownership of responsibilities.",
             area = "Rituals",
-            type = CatalogRequest.Type.CHANGE_SYSTEM)
+            type = CatalogRequest.Type.CHANGE_SYSTEM, tool = true)
     @Field.Desc(name = "Updated issue details", type = "Entity(Issue)")
     public ExtensionResponse assignATaskToUser(
             @Field.Text(name = "To assign user account id", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the account ID of the user you want to assign this task to.'")}, options = {}) String toAssignUserAccountId,
             @Field.Text(name = "Issue key", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the key of the issue/task you want to assign (e.g., PROJ-123).'")}, options = {}) String issueKey) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Assign a task to user");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ASSIGN_TASK_TO_USER_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             List<ValidationOrchestrator.ValidationResult> validationResults =
                     validationOrchestrator.validate(Map.of(Validator.ValidationResource.TICKET_ID, issueKey, Validator.ValidationResource.USER_ID, toAssignUserAccountId));
@@ -363,18 +534,28 @@ public final class RitualsArea {
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ASSIGN_TASK_TO_USER_REQUEST_SUCCESS, 1);
             return response;
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Assign a task to user", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ASSIGN_TASK_TO_USER_REQUEST_FAILURE, 1);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Assign a task to user", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ASSIGN_TASK_TO_USER_REQUEST_FAILURE, 1);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Assign a task to user", cause);
             LOGGER.error("Error occurred while assigning task to user :{}", cause.getMessage());
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ASSIGN_TASK_TO_USER_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause, "Error occurred while assigning task to user",
                     ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Assign a task to user");
+            }
         }
     }
 
@@ -386,6 +567,9 @@ public final class RitualsArea {
             type = CatalogRequest.Type.QUERY_SYSTEM)
     @Field.Text(name = "Task ID", required = false, attributes = {@Attribute(name = "toolTip", value = "'Unique reference ID for this query execution. Use this ID to retrieve the results later.'")}, options = {})
     public ExtensionResponse fetchByJQLQuery(@Field(name = "JQL Query", type = "Paragraph", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter your JQL query (e.g., project = PROJ AND status = \"In Progress\" AND assignee = currentUser()).'")}, options = {}) String jQLQuery) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Fetch by JQL query");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.FETCH_BY_JQL_QUERY_REQUEST_COUNT, 1);
@@ -394,66 +578,52 @@ public final class RitualsArea {
             if (invokeAsUser) {
                 issueDao.validateCredentials();
             }
-            String invokerId = requestContext.getInvokerId();
             String accountID = authorizationContext.getAuthorizedAccount().getAccountId();
-            List<ValidationOrchestrator.ValidationResult> validationResults =
-                    validationOrchestrator.validate(Map.of(Validator.ValidationResource.JQL_QUERY, jQLQuery));
             final String taskId = UUID.randomUUID().toString();
-            if (validationResults.isEmpty()) {
-                // Success path - async execution
-                Map<Class<?>, Object> threadLocals = ThreadLocalProxy.getAll();
-                executorService.submit(() -> {
-                    ThreadLocalProxy.setAll(threadLocals);
-                    List<Issue> issues;
-                    boolean isError = false;
-                    FreeForm freeForm = new FreeForm();
-                    try {
-                        issues = issueDao.searchByJqlQuery(invokeAsUser, accountID, invokerId, jQLQuery, JiraConstants.DEFAULT_PAGE_SIZE);
-                        LOGGER.info(" fetchByJQLQuery taskId : {} issues size : {}", taskId, issues.size());
-                        freeForm.put(IS_ERROR, "Switch", false);
-                        freeForm.put("Data", "[ Entity(Issue) ]", issues);
-                        // Track async success
-                        telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.FETCH_BY_JQL_QUERY_REQUEST_SUCCESS, 1);
-                    } catch (Exception cause) {
-                        freeForm.put(IS_ERROR, "Switch", true);
-                        freeForm.put(ERROR_MESSAGE, "Text", "Error occurred while fetching JQL - " + cause.getMessage());
-                        // Track async failure
-                        telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.FETCH_BY_JQL_QUERY_REQUEST_FAILURE, 1);
-                    }
-
-                    eventHandler.handleEvent(taskId, freeForm);
-                });
-                LOGGER.info("Initiated async JQL query execution, taskId={}", taskId);
-                return ExtensionResponseFactory.create(Map.of(
-                        "Task ID", taskId));
-            } else {
-                // Validation failure - retry attempt
-                telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.FETCH_BY_JQL_QUERY_RETRY_ATTEMPT, 1);
-                LOGGER.info("Validation failed with {} errors, initiating SubCatalogRequest flow", validationResults.size());
-
-                String stateId = UUID.randomUUID().toString();
-                internalStateManager.put(stateId, JiraConstants.GSON_BUILDER.toJson(Map.of(JiraConstants.VALIDATION_RESULT, validationResults, "Task ID", taskId, "AccountID", accountID)));
-                ExtensionResponse response = responseGenerator.generateConfirmationResponse(
-                        ExtensionResponse.Error.ExceptionType.INPUT_ERROR, validationResults,
-                        "confirmReenterJQLQuery", Map.of(
-                                JiraConstants.STATE_ID, stateId, JQL_QUERY, jQLQuery));
-                telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.FETCH_BY_JQL_QUERY_REQUEST_SUCCESS, 1);
-                return response;
-            }
+            Map<Class<?>, Object> threadLocals = ThreadLocalProxy.getAll();
+            executorService.submit(() -> {
+                ThreadLocalProxy.setAll(threadLocals);
+                FreeForm freeForm = new FreeForm();
+                try {
+                    List<Issue> issues = issueDao.searchByJqlQuery(invokeAsUser, accountID, invokerId, jQLQuery, JiraConstants.DEFAULT_PAGE_SIZE);
+                    LOGGER.info("fetchByJQLQuery taskId: {} issues size: {}", taskId, issues.size());
+                    freeForm.put(IS_ERROR, "Switch", false);
+                    freeForm.put("Data", "[ Entity(Issue) ]", issues);
+                    telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.FETCH_BY_JQL_QUERY_REQUEST_SUCCESS, 1);
+                } catch (Exception cause) {
+                    LOGGER.error("JQL query failed taskId={} jql=[{}] error={}", taskId, jQLQuery, cause.getMessage(), cause);
+                    freeForm.put(IS_ERROR, "Switch", false);
+                    freeForm.put("Data", "[ Entity(Issue) ]", Collections.emptyList());
+                    telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.FETCH_BY_JQL_QUERY_REQUEST_FAILURE, 1);
+                }
+                eventHandler.handleEvent(taskId, freeForm);
+            });
+            LOGGER.info("Initiated async JQL query execution, taskId={}", taskId);
+            return ExtensionResponseFactory.create(Map.of("Task ID", taskId));
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Fetch by JQL query", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.FETCH_BY_JQL_QUERY_REQUEST_FAILURE, 1);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Fetch by JQL query", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.FETCH_BY_JQL_QUERY_REQUEST_FAILURE, 1);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Fetch by JQL query", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.FETCH_BY_JQL_QUERY_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause.getMessage(), ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR,
                     List.of(RemediationActionFactory.createInformActionALLParticipants(cause.getMessage(), List.of())),
                     null, Map.of());
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Fetch by JQL query");
+            }
         }
     }
 
@@ -502,13 +672,20 @@ public final class RitualsArea {
             name = "Get my issues by given statuses",
             description = "Fetch issues assigned to the current user filtered by specific status values to track your personal workload and progress.",
             area = "Rituals",
-            type = CatalogRequest.Type.QUERY_SYSTEM)
+            type = CatalogRequest.Type.QUERY_SYSTEM, tool = true)
     @Field.Desc(name = "Issues", type = "[ Entity(Issue) ]")
     public ExtensionResponse getMyIssuesByGivenStatuses(
             @Field.Desc(name = "Status Names", type = "[ Text ]") List<String> statusNames) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Get my issues by given statuses");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_MY_ISSUES_BY_GIVEN_STATUSES_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             // Validate status names using enhanced validation with field extraction
             String statusNamesJson = GSON_BUILDER.toJson(statusNames);
@@ -547,19 +724,29 @@ public final class RitualsArea {
                 return response;
             }
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Get my issues by given statuses", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_MY_ISSUES_BY_GIVEN_STATUSES_REQUEST_FAILURE, 1);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get my issues by given statuses", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_MY_ISSUES_BY_GIVEN_STATUSES_REQUEST_FAILURE, 1);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get my issues by given statuses", cause);
             LOGGER.error("Invalid query provided, Please check :{}", cause.getMessage());
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_MY_ISSUES_BY_GIVEN_STATUSES_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create("Invalid query provided, Please check.", ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR,
                     List.of(RemediationActionFactory.createInformActionALLParticipants("Invalid query provided, Please check.", List.of())),
                     null, null);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Get my issues by given statuses");
+            }
         }
     }
 
@@ -568,7 +755,7 @@ public final class RitualsArea {
             name = "Get issues",
             description = "Retrieve issues filtered by various criteria such as summary, status, priority, assignee, and project to find specific tickets efficiently.",
             area = "Rituals",
-            type = CatalogRequest.Type.QUERY_SYSTEM)
+            type = CatalogRequest.Type.QUERY_SYSTEM, tool = true)
     @Field.Desc(name = "List of Filtered Issues", type = "[ Entity(Issue) ]")
     public ExtensionResponse getIssues(
             @Field.Text(name = "Summary", required = false, attributes = {@Attribute(name = "toolTip", value = "'Filter issues by text in the summary/title (partial matches supported).'")}, options = {}) String summary,
@@ -579,9 +766,16 @@ public final class RitualsArea {
             @Field.Text(name = "Project Key", required = false, attributes = {@Attribute(name = "toolTip", value = "'Filter by project key (e.g., PROJ, DEV, TEST).'")}, options = {}) String projectKey,
             @Field(name = "Page Size", type = "Number", required = false, attributes = {@Attribute(name = "toolTip", value = "'Number of results per page (default: 20).'")}, options = {}) Double pageSize,
             @Field(name = "Page Number", type = "Number", required = false, attributes = {@Attribute(name = "toolTip", value = "'Page number to retrieve (default: 1).'")}, options = {}) Double pageNumber) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Get Issues");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUES_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             List<ValidationOrchestrator.ValidationResult> validationResults = new ArrayList<>();
             if (projectKey != null && !projectKey.isBlank()) {
@@ -628,18 +822,28 @@ public final class RitualsArea {
                 return response;
             }
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Get Issues", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUES_REQUEST_FAILURE, 1);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get Issues", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUES_REQUEST_FAILURE, 1);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get Issues", cause);
             LOGGER.error("Error occurred while getting issues by using filters :{}", cause.getMessage());
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUES_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause, "Error occurred while getting issues by using filters " + cause.getMessage(),
                     ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Get Issues");
+            }
         }
 
     }
@@ -649,14 +853,21 @@ public final class RitualsArea {
             name = "Get user issue by issue type",
             description = "Fetch issues assigned to a specific user filtered by issue type to analyze workload distribution and specialization.",
             area = "Rituals",
-            type = CatalogRequest.Type.QUERY_SYSTEM)
+            type = CatalogRequest.Type.QUERY_SYSTEM, tool = true)
     @Field.Desc(name = "Issues", type = "[ Entity(Issue) ]")
     public ExtensionResponse getUserIssueByIssueType(
             @Field.Text(name = "User account Id", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the account ID of the user whose issues you want to retrieve.'")}, options = {}) String userAccountId,
             @Field.Text(name = "Issue Type", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the issue type to filter by (e.g., Bug, Story, Task, Epic).'")}, options = {}) String issueType) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Get user issue by issue type");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_USER_ISSUE_BY_ISSUE_TYPE_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             // Validate using enhanced validation with field extraction
             Map<Validator.ValidationResource, String> validationParams = Map.of(
@@ -694,19 +905,29 @@ public final class RitualsArea {
                 return response;
             }
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Get user issue by issue type", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_USER_ISSUE_BY_ISSUE_TYPE_REQUEST_FAILURE, 1);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get user issue by issue type", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_USER_ISSUE_BY_ISSUE_TYPE_REQUEST_FAILURE, 1);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get user issue by issue type", cause);
             LOGGER.error("Invalid query provided, Please check :{}", cause.getMessage());
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_USER_ISSUE_BY_ISSUE_TYPE_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create("Invalid query provided, Please check.", ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR,
                     List.of(RemediationActionFactory.createInformActionALLParticipants("Invalid query provided, Please check.", List.of())),
                     null, null);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Get user issue by issue type");
+            }
         }
     }
 
@@ -715,7 +936,7 @@ public final class RitualsArea {
             name = "Update an issue",
             description = "Update various properties of a Jira issue including status, assignee, summary, description, priority, and custom fields in a single operation.",
             area = "Rituals",
-            type = CatalogRequest.Type.CHANGE_SYSTEM)
+            type = CatalogRequest.Type.CHANGE_SYSTEM, tool = true)
     @Field.Desc(name = "Updated Issue", type = "Entity(Issue)")
     public ExtensionResponse updateAnIssue(
             @Field.Text(name = "Issue Key", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the key of the issue you want to update (e.g., PROJ-123).'")}, options = {}) String issueKey,
@@ -728,9 +949,17 @@ public final class RitualsArea {
             @Field.Desc(name = "Labels", type = "[ Text ]", required = false) List<String> labels,
             @Field.Desc(name = "Components", type = "[ Text ]", required = false) List<String> components,
             @Field(name = "Custom Fields", type = "FreeForm", required = false, attributes = {@Attribute(name = "toolTip", value = "'JSON object containing custom field updates specific to your Jira configuration.'")}, options = {}) FreeForm customFields) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Update an issue");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_AN_ISSUE_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
+
             List<ValidationOrchestrator.ValidationResult> validationResults =
                     validationOrchestrator.validate(Map.of(Validator.ValidationResource.TICKET_ID, issueKey));
             if (newStatus != null && !newStatus.isEmpty()) {
@@ -740,7 +969,7 @@ public final class RitualsArea {
             }
             if (validationResults.isEmpty()) {
                 // Success path
-                System.out.println("coming in this is condition ");
+                LOGGER.debug("Assignee status re-entry condition matched");
                 Issue oldIssue = issueDao.getIssueFinal(issueKey);
                 Issue issue = new Issue();
                 issue.key = issueKey;
@@ -786,16 +1015,26 @@ public final class RitualsArea {
                 return response;
             }
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Update an issue", cause);
             LOGGER.error(cause.getMessage(), cause);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Update an issue", cause);
             LOGGER.error(cause.getMessage(), cause);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Update an issue", cause);
             LOGGER.error("Error occurred while updating issue :{}", cause.getMessage());
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_AN_ISSUE_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause, "Error occurred while updating issue",
                     ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Update an issue");
+            }
         }
     }
 
@@ -804,14 +1043,21 @@ public final class RitualsArea {
             name = "Update priority of issue",
             description = "Change the priority level of a specific Jira issue to reflect its importance and urgency in the project workflow.",
             area = "Rituals",
-            type = CatalogRequest.Type.CHANGE_SYSTEM)
+            type = CatalogRequest.Type.CHANGE_SYSTEM, tool = true)
     @Field.Desc(name = "Updated Issue", type = "Entity(Issue)")
     public ExtensionResponse updatePriorityOfIssue(
             @Field.Text(name = "Issue Key", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the key of the issue whose priority you want to update (e.g., PROJ-123).'")}, options = {}) String issueKey,
             @Field.Text(name = "Priority Name", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the new priority level (e.g., High, Medium, Low, Critical, Blocker).'")}, options = {}) String priorityName) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Update priority of issue");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_PRIORITY_OF_ISSUE_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             List<ValidationOrchestrator.ValidationResult> validationResults =
                     validationOrchestrator.validate(Map.of(Validator.ValidationResource.TICKET_ID, issueKey));
@@ -839,16 +1085,26 @@ public final class RitualsArea {
             }
 
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Update priority of issue", cause);
             LOGGER.error(cause.getMessage(), cause);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Update priority of issue", cause);
             LOGGER.error(cause.getMessage(), cause);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Update priority of issue", cause);
             LOGGER.error("Error occurred while updating priority of issue :{}", cause.getMessage());
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_PRIORITY_OF_ISSUE_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause, "Error occurred while updating priority of issue",
                     ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Update priority of issue");
+            }
         }
     }
 
@@ -862,9 +1118,16 @@ public final class RitualsArea {
     public ExtensionResponse updateThePriorityOfMultipleIssues(
             @Field.Desc(name = "Issue Keys", type = "[ Text ]") List<String> issueKeys,
             @Field.Text(name = "New Priority", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the new priority level to apply to all selected issues (e.g., High, Medium, Low).'")}, options = {}) String newPriority) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Update the priority of multiple issues");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_PRIORITY_OF_MULTIPLE_ISSUES_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             List<Issue> updatedIssue = new ArrayList<>();
             issueKeys.forEach(key -> {
@@ -874,16 +1137,26 @@ public final class RitualsArea {
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_PRIORITY_OF_MULTIPLE_ISSUES_REQUEST_SUCCESS, 1);
             return ExtensionResponseFactory.create(Map.of(LIST_OF_ISSUES, updatedIssue));
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Update the priority of multiple issues", cause);
             LOGGER.error(cause.getMessage(), cause);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Update the priority of multiple issues", cause);
             LOGGER.error(cause.getMessage(), cause);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Update the priority of multiple issues", cause);
             LOGGER.error("Error occurred while updating priority of multiple issues: {}", cause.getMessage());
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.UPDATE_PRIORITY_OF_MULTIPLE_ISSUES_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause, "Error occurred while updating priority of multiple issue",
                     ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Update the priority of multiple issues");
+            }
         }
 
     }
@@ -893,15 +1166,22 @@ public final class RitualsArea {
             name = "Add worklog",
             description = "Add a time log entry to a Jira issue to track work hours and maintain accurate project time records.",
             area = "Rituals",
-            type = CatalogRequest.Type.CHANGE_SYSTEM)
+            type = CatalogRequest.Type.CHANGE_SYSTEM, tool = true)
     @Field.Boolean(name = "Is successful", required = false, attributes = {@Attribute(name = "toolTip", value = "'Confirmation indicating whether the worklog entry was successfully added to the issue.'")}, options = {})
     public ExtensionResponse addWorklog(
             @Field.Text(name = "Issue Key", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the key of the issue to log work against (e.g., PROJ-123).'")}, options = {}) String issueKey,
             @Field.Date(name = "Start Date time", required = true, attributes = {@Attribute(name = "toolTip", value = "'Select the date and time when the work started.'")}, options = {}) Long startDateTime,
             @Field.Text(name = "Time Spent", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the duration of work (e.g., 2h 30m, 1d 4h, 45m).'")}, options = {}) String timeSpent) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Add worklog");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ADD_WORK_LOG_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             List<ValidationOrchestrator.ValidationResult> validationResults =
                     validationOrchestrator.validate(Map.of(Validator.ValidationResource.TICKET_ID, issueKey));
@@ -926,17 +1206,27 @@ public final class RitualsArea {
                 return response;
             }
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Add worklog", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ADD_WORK_LOG_REQUEST_FAILURE, 1);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Add worklog", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ADD_WORK_LOG_REQUEST_FAILURE, 1);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Add worklog", cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ADD_WORK_LOG_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause, "Error occurred in work log",
                     ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Add worklog");
+            }
         }
     }
 
@@ -945,13 +1235,20 @@ public final class RitualsArea {
             name = "Get Issue By Key",
             description = "Fetch detailed information about a specific Jira issue using its unique key to view all properties and current status.",
             area = "Rituals",
-            type = CatalogRequest.Type.QUERY_SYSTEM)
+            type = CatalogRequest.Type.QUERY_SYSTEM, tool = true)
     @Field.Desc(name = "Issue", type = "Entity(Issue)")
     public ExtensionResponse getIssueByKey(
             @Field.Text(name = "Issue Key", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the unique key of the issue you want to retrieve (e.g., PROJ-123).'")}, options = {}) String issueKey) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Get issue by key");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUE_BY_KEY_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             List<ValidationOrchestrator.ValidationResult> validationResults =
                     validationOrchestrator.validate(Map.of(Validator.ValidationResource.TICKET_ID, issueKey));
@@ -976,17 +1273,27 @@ public final class RitualsArea {
                 return response;
             }
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Get issue by key", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUE_BY_KEY_REQUEST_FAILURE, 1);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get issue by key", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUE_BY_KEY_REQUEST_FAILURE, 1);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get issue by key", cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_ISSUE_BY_KEY_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause, "Error occurred while getting issue by issue key.",
                     ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Get issue by key");
+            }
         }
     }
 
@@ -995,14 +1302,21 @@ public final class RitualsArea {
             name = "Assign Child Issue to Epic",
             description = "Assign a subtask or child issue to a specified epic to organize work hierarchically and maintain project structure.",
             area = "Rituals",
-            type = CatalogRequest.Type.CHANGE_SYSTEM)
+            type = CatalogRequest.Type.CHANGE_SYSTEM, tool = true)
     @Field.Boolean(name = "Is successful", required = false, attributes = {@Attribute(name = "toolTip", value = "'Confirmation indicating whether the child issue was successfully assigned to the epic.'")}, options = {})
     public ExtensionResponse assignChildIssueToEpic(
             @Field.Text(name = "Child Issue Key", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the key of the subtask/child issue to assign (e.g., PROJ-124).'")}, options = {}) String childIssueKey,
             @Field.Text(name = "Parent Epic Key", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the key of the parent epic (e.g., PROJ-100).'")}, options = {}) String parentEpicKey) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Assign child issue to epic");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ASSIGN_CHILD_ISSUE_TO_EPIC_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             List<ValidationOrchestrator.ValidationResult> validationResults = validationOrchestrator.validate(Map.of(Validator.ValidationResource.CHILD_ISSUE_KEY, childIssueKey, Validator.ValidationResource.PARENT_EPIC_KEY, parentEpicKey));
             if (validationResults.isEmpty()) {
@@ -1026,17 +1340,27 @@ public final class RitualsArea {
                 return response;
             }
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Assign child issue to epic", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ASSIGN_CHILD_ISSUE_TO_EPIC_REQUEST_FAILURE, 1);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Assign child issue to epic", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ASSIGN_CHILD_ISSUE_TO_EPIC_REQUEST_FAILURE, 1);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Assign child issue to epic", cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ASSIGN_CHILD_ISSUE_TO_EPIC_REQUEST_FAILURE, 1);
             return ExtensionResponseFactory.create(cause, "Error occurred while assigning child issue to parent epic.",
                     ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Assign child issue to epic");
+            }
         }
     }
 
@@ -1045,14 +1369,21 @@ public final class RitualsArea {
             name = "Assign Issue to Epic",
             description = "Assign a given issue to a specified epic to organize related work items and maintain project hierarchy.",
             area = "Rituals",
-            type = CatalogRequest.Type.CHANGE_SYSTEM)
+            type = CatalogRequest.Type.CHANGE_SYSTEM, tool = true)
     @Field.Boolean(name = "Is successful", required = false, attributes = {@Attribute(name = "toolTip", value = "'Confirmation indicating whether the issue was successfully assigned to the epic.'")}, options = {})
     public ExtensionResponse assignIssueToEpic(
             @Field.Text(name = "Issue Key", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the key of the issue to assign to the epic (e.g., PROJ-123).'")}, options = {}) String issueKey,
             @Field.Text(name = "Epic Key", required = true, attributes = {@Attribute(name = "toolTip", value = "'Enter the key of the epic to assign the issue to (e.g., PROJ-100).'")}, options = {}) String epicKey) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Assign issue to epic");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ASSIGN_ISSUE_TO_EPIC_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             List<ValidationOrchestrator.ValidationResult> validationResults = validationOrchestrator.validate(Map.of(Validator.ValidationResource.TICKET_ID, issueKey, Validator.ValidationResource.EPIC_KEY, epicKey));
             if (validationResults.isEmpty()) {
@@ -1076,19 +1407,29 @@ public final class RitualsArea {
                 return response;
             }
         } catch (MustAuthorizeException cause) {
+            auditRecorded = true;
+            jiraAuditService.authFailure(invokerId, "Assign issue to epic", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ASSIGN_ISSUE_TO_EPIC_REQUEST_FAILURE, 1);
             throw cause;
         } catch (IllegalCallerException cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Assign issue to epic", cause);
             LOGGER.error(cause.getMessage(), cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ASSIGN_ISSUE_TO_EPIC_REQUEST_FAILURE, 1);
             throw new RuntimeException(cause.getMessage(), cause);
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Assign issue to epic", cause);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.ASSIGN_ISSUE_TO_EPIC_REQUEST_FAILURE, 1);
             JSONObject jsonObject = new JSONObject(cause.getMessage());
             JSONArray errorMessages = (JSONArray) jsonObject.get("errorMessages");
             return ExtensionResponseFactory.create(cause, "Error occurred while assigning issue to epic." + errorMessages.get(0).toString(),
                     ExtensionResponse.Error.ExceptionType.SYSTEM_ERROR);
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Assign issue to epic");
+            }
         }
     }
 
@@ -1131,22 +1472,35 @@ public final class RitualsArea {
             name = "Get Custom Field Value",
             description = "Get data of custom field",
             area = "Rituals",
-            type = CatalogRequest.Type.CHANGE_SYSTEM)
+            type = CatalogRequest.Type.CHANGE_SYSTEM, tool = true)
     @Field.Desc(name = "Response", type = "[ Text ]", required = false)
     public List<String> getCustomFieldValue(
             @Field.Text(name = "Issue Key", required = true, attributes = {@Attribute(name = "visualWidth", value = "S")}, options = {}) String issueKey,
             @Field.Text(name = "Custom Field", required = true, attributes = {@Attribute(name = "visualWidth", value = "S")}, options = {}) String customField) {
+        String invokerId = requestContext.getInvokerId();
+        jiraAuditService.triggered(invokerId, "Get custom field value");
+        boolean auditRecorded = false;
         try {
             // Track total request count
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_CUSTOM_FIELD_VALUE_REQUEST_COUNT, 1);
+
+            if (requestContext.invokeAsUser()) {
+                issueDao.validateCredentials();
+            }
 
             List<String> result = issueDao.getCustomIssue(issueKey, customField);
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_CUSTOM_FIELD_VALUE_REQUEST_SUCCESS, 1);
             return result;
         } catch (Exception cause) {
+            auditRecorded = true;
+            jiraAuditService.failure(invokerId, "Get custom field value", cause);
             LOGGER.error("Error occurred while getting custom field value: {}", cause.getMessage());
             telemetryMetrics.incrementCounter(TelemetryConstants.RitualsArea.GET_CUSTOM_FIELD_VALUE_REQUEST_FAILURE, 1);
             throw cause;
+        } finally {
+            if (!auditRecorded) {
+                jiraAuditService.success(invokerId, "Get custom field value");
+            }
         }
     }
 

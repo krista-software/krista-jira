@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.util;
@@ -35,6 +35,8 @@ public final class IssueMapper {
         epic.type = issue.issueType;
         epic.summary = issue.summary;
         epic.id = issue.id;
+        epic.createdDate = issue.createdDate;
+        epic.lastModifiedDate = issue.lastModifiedDate;
         return epic;
     }
 
@@ -51,6 +53,9 @@ public final class IssueMapper {
         task.taskType = issue.issueType;
         task.summary = issue.summary;
         task.id = issue.id;
+        task.parentKey = issue.parentKey;
+        task.createdDate = issue.createdDate;
+        task.lastModifiedDate = issue.lastModifiedDate;
         return task;
     }
 
@@ -67,6 +72,9 @@ public final class IssueMapper {
         bug.type = issue.issueType;
         bug.summary = issue.summary;
         bug.id = issue.id;
+        bug.parentKey = issue.parentKey;
+        bug.createdDate = issue.createdDate;
+        bug.lastModifiedDate = issue.lastModifiedDate;
         return bug;
     }
 
@@ -83,6 +91,9 @@ public final class IssueMapper {
         story.storyType = issue.issueType;
         story.summary = issue.summary;
         story.id = issue.id;
+        story.parentKey = issue.parentKey;
+        story.createdDate = issue.createdDate;
+        story.lastModifiedDate = issue.lastModifiedDate;
         return story;
     }
 
@@ -100,6 +111,8 @@ public final class IssueMapper {
         subtask.summary = issue.summary;
         subtask.id = issue.id;
         subtask.parentKey = issue.parentKey;
+        subtask.createdDate = issue.createdDate;
+        subtask.lastModifiedDate = issue.lastModifiedDate;
         return subtask;
     }
 
@@ -149,6 +162,7 @@ public final class IssueMapper {
         issue.issueType = bug.type;
         issue.summary = bug.summary;
         issue.id = bug.id;
+        issue.parentKey = bug.parentKey;
         return issue;
     }
 
@@ -165,6 +179,7 @@ public final class IssueMapper {
         issue.issueType = story.storyType;
         issue.summary = story.summary;
         issue.id = story.id;
+        issue.parentKey = story.parentKey;
         return issue;
     }
 
@@ -181,6 +196,7 @@ public final class IssueMapper {
         issue.issueType = task.taskType;
         issue.summary = task.summary;
         issue.id = task.id;
+        issue.parentKey = task.parentKey;
         return issue;
     }
 }

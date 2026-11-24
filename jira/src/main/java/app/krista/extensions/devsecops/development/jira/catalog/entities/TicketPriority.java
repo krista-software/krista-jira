@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -29,15 +29,15 @@ import app.krista.extension.impl.anno.*;
         ecosystemId = "catEntryEcosystem_98c365b2-ab5a-463a-ac13-6da05a67c417",
         ecosystemName = "Dev Sec Ops",
         ecosystemVersion = "7339e9c9-76fd-4b24-bf95-4c5fdc3cef85")
-@Entity(name = "Ticket Priority", id = "localDomainEntity_ac591738-5e26-450f-9968-01f6e1e0739f", primaryKey = "Id", supportStore = false)
+@Entity(name = "Ticket Priority", id = "localDomainEntity_ac591738-5e26-450f-9968-01f6e1e0739f", primaryKey = "Id", supportStore = true, description = "Represents a priority level for Jira tickets. The Name field is referenced by the Priority field on Bug, Story, Epic, Task, Subtask, and Issue entities.")
 public class TicketPriority {
 
-    @Field(name = "Id", type = "Text", required = false)
+    @Field.Text(name = "Id", description = "Internal Jira identifier for the priority", required = false)
     public String id;
 
     @Searchable
     @ToString
-    @Field(name = "Name", type = "Text")
+    @Field.Text(name = "Name", description = "Name of the priority level. Referenced by Bug.Priority, Story.Priority, Epic.Priority, Task.Priority, Subtask.Priority, and Issue.Priority.")
     public String name;
 
     @ToString

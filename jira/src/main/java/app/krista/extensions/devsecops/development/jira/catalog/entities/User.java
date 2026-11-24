@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -31,32 +31,32 @@ import java.util.Map;
         ecosystemId = "catEntryEcosystem_98c365b2-ab5a-463a-ac13-6da05a67c417",
         ecosystemName = "Dev Sec Ops",
         ecosystemVersion = "7339e9c9-76fd-4b24-bf95-4c5fdc3cef85")
-@Entity(name = "User", id = "localDomainEntity_c68856a4-72c6-4c49-9a3d-08fc863c72c4", primaryKey = "Account Id", supportStore = false)
+@Entity(name = "User", id = "localDomainEntity_c68856a4-72c6-4c49-9a3d-08fc863c72c4", primaryKey = "Account Id", supportStore = true, description = "Represents a Jira user account. Display Name is referenced by Reporter Name and Assignee Name fields on Bug, Story, Epic, Task, Subtask, and Issue. Account Id is referenced by Ticket Project.Lead Account Id.")
 public class User {
 
     @Searchable
     @ToString
-    @Field(name = "Name", type = "Text")
+    @Field.Text(name = "Name", description = "Display name of the Jira user")
     public String name;
 
-    @Field(name = "Account Id", type = "Text")
+    @Field.Text(name = "Account Id", description = "Unique account identifier for the Jira user. Referenced by Ticket Project.Lead Account Id.")
     public String accountId;
 
     @Searchable
     @ToString
-    @Field(name = "Email", type = "Text")
+    @Field.Text(name = "Email", description = "Email address of the Jira user")
     public String email;
 
-    @Field(name = "Account Type", type = "Text")
+    @Field.Text(name = "Account Type", description = "Type of the Jira user account")
     public String accountType;
 
-    @Field(name = "Self", type = "Text", required = false)
+    @Field.Text(name = "Self", description = "Self-referencing URL of the Jira user resource", required = false)
     public String self;
 
-    @Field(name = "Display Name", type = "Text", required = false)
+    @Field.Text(name = "Display Name", description = "Full display name of the Jira user. Referenced by Reporter Name and Assignee Name on Bug, Story, Epic, Task, Subtask, and Issue entities.", required = false)
     public String displayName;
 
-    @Field.Desc(name = "Application Keys", type = "[ Text ]", required = false)
+    @Field.Desc(name = "Application Keys", type = "[ Text ]", description = "List of application keys associated with the user", required = false)
     public List<String> applicationKeys;
 
 

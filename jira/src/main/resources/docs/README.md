@@ -8,15 +8,16 @@ The JIRA Project Management Extension provides comprehensive integration between
 seamless project management, issue tracking, and team collaboration workflows. This extension supports advanced features
 including JQL queries, real-time webhooks, bulk operations, and sophisticated user management capabilities.
 
-## What's New in Version 2.0.23
+## What's New in Version 2.0.26
 
-### New Features
+### Bug Fix
 
-- **Get User Account Information** - Retrieve comprehensive user account details by email or username
-    - Search users by email address or username
-    - Returns complete user profile (Name, Account Id, Email, Account Type, Display Name, Application Keys)
-    - Privacy-compliant with respect to user email visibility settings
-    - Perfect for user validation before issue assignment and automation workflows
+- **OAuth 2.0 Shared User Support** - Store and retrieve OAuth refresh tokens using a client-level key, shared across users
+    - OAuth refresh tokens are now stored under an app-wide key (`clientId#clientSecret#invokerId`) in addition to per-user keys
+    - When a user-specific token is not found, the extension falls back to the app-wide token
+    - Enables seamless OAuth authentication across multiple users sharing the same OAuth app
+    - Admin authorization via Validate Attributes is now shared with all users of the extension
+    - Individual users can also authenticate independently via the authorization checkbox flow
 
 ### Code Quality & Testing
 
@@ -26,20 +27,22 @@ including JQL queries, real-time webhooks, bulk operations, and sophisticated us
 - **SonarQube Integration** - Static code analysis support (v6.3.1.5724)
     - Pre-configured for Jira extension analysis
     - Ready for CI/CD pipeline integration
-- **Comprehensive Test Suite** - 14 new integration tests with 100% pass rate
-    - UserServiceTest: 6 tests covering service layer
-    - OrganizationAreaTest: 8 tests covering catalog layer
+- **Comprehensive Test Suite** - 141 tests with 100% pass rate
+    - JiraServiceTest: 45 tests covering OAuth service, token management, and accessible resources
+    - JiraAttributesTest: 69 tests covering attribute validation, credential checking, and configuration
+    - AuthenticationResourceIntegrationTest: 27 tests covering OAuth callback, webhook handling, and token exchange
 
 ### Documentation
 
-- Complete documentation for Get User Account Information request
-- Updated release notes with version 2.0.23 details
-- Enhanced sidebar navigation
+- Updated Authentication guide with OAuth popup flow, user authentication via checkbox, and troubleshooting
+- Updated Extension Configuration with streamlined setup instructions
+- Updated release notes with version 2.0.26 details
 
 ## Key Features
 
 - **Complete Issue Lifecycle Management**: Create, read, update, and track issues throughout their lifecycle
 - **Advanced Search & Filtering**: Powerful JQL (JIRA Query Language) support for complex queries
+- **AI Assistant**: Natural language interface — ask questions in plain English and get Jira results instantly
 - **User & Permission Management**: Comprehensive user administration and group management
 - **Real-time Notifications**: Webhook-based event notifications for instant updates
 - **File & Attachment Management**: Upload, download, and manage file attachments
@@ -94,6 +97,10 @@ including JQL queries, real-time webhooks, bulk operations, and sophisticated us
 
 - [Get Release Summary](pages/GetReleaseSummary.md) - Comprehensive release analytics and reporting
 
+### AI Assistant
+
+- [AI Assistant](pages/AiAssistant.md) - Natural language Jira queries powered by Claude
+
 ### Advanced Topics
 
 - [Troubleshooting](pages/Troubleshooting.md) - Common issues and solutions
@@ -102,16 +109,16 @@ including JQL queries, real-time webhooks, bulk operations, and sophisticated us
 
 ## Support & Resources
 
-- **Extension Version**: 2.0.23
+- **Extension Version**: 2.0.26
 - **JIRA API Version**: REST API v2/v3
 - **Java Version**: 21
 - **Gradle Version**: 8.5
 - **Authentication Methods**: OAuth 2.0, API Token
-- **Webhook Support**: ✅ Yes
-- **Retry Support**: ✅ Yes (with user-friendly error handling)
-- **Real-time Updates**: ✅ Yes (via webhooks)
-- **Code Coverage**: ✅ Yes (JaCoCo integration)
-- **Code Quality**: ✅ Yes (SonarQube integration)
+- **Webhook Support**: Yes
+- **Retry Support**: Yes (with user-friendly error handling)
+- **Real-time Updates**: Yes (via webhooks)
+- **Code Coverage**: Yes (JaCoCo integration)
+- **Code Quality**: Yes (SonarQube integration)
 
 ## Technical Specifications
 
@@ -144,8 +151,8 @@ open build/reports/jacoco/test/html/index.html
 
 ### Test Coverage
 
-- **Total Tests**: 14 integration tests for user account operations
-- **Pass Rate**: 100% (14/14 passing)
+- **Total Tests**: 141 tests across 3 core test classes
+- **Pass Rate**: 100% (141/141 passing)
 - **Coverage Reports**: XML (SonarQube) and HTML (local viewing)
 - **Test Quality**: AAA pattern, proper mocking, comprehensive assertions
 
@@ -154,7 +161,7 @@ open build/reports/jacoco/test/html/index.html
 For detailed information about the latest changes, improvements, and bug fixes, see
 the [Release Notes](pages/releaseNotes.md).
 
-**Latest Release**: Version 2.0.23 - Feature Enhancement & Testing (January 15, 2026)
+**Latest Release**: Version 2.0.26 - OAuth 2.0 Shared User Support (February 27, 2026)
 
 ---
 

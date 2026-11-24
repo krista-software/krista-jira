@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -28,12 +28,12 @@ import java.util.Map;
         ecosystemId = "catEntryEcosystem_98c365b2-ab5a-463a-ac13-6da05a67c417",
         ecosystemName = "Dev Sec Ops",
         ecosystemVersion = "0fae7d39-6710-43ca-8f84-e0f20a150cc9")
-@Entity(name = "Label", id = "localDomainEntity_40c80bb0-0d83-424f-8f2c-e941985a68fa", primaryKey = "Name", supportStore = false)
+@Entity(name = "Label", id = "localDomainEntity_40c80bb0-0d83-424f-8f2c-e941985a68fa", primaryKey = "Name", supportStore = true, description = "Represents a label used to categorize Jira issues. The Name field is referenced by Issue.Labels.")
 public class Label {
 
     @Searchable
     @ToString
-    @Field(name = "Name", type = "Text", required = false)
+    @Field.Text(name = "Name", description = "Name of the label. Referenced by Issue.Labels.", required = false)
     public final String name;
 
     public Map<String, Object> toFields() {

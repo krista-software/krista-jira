@@ -13,17 +13,19 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entityrequests.impl;
 
+import app.krista.extension.executor.QueryClause;
 import app.krista.extension.executor.SearchCondition;
 import app.krista.extension.executor.SearchQuery;
 import app.krista.extensions.devsecops.development.jira.catalog.entities.Issue;
 import app.krista.extensions.devsecops.development.jira.catalog.entities.Story;
 import app.krista.extensions.devsecops.development.jira.catalog.entityrequests.EntityImplementationService;
 import app.krista.extensions.devsecops.development.jira.impl.IssueDao;
+import app.krista.extensions.devsecops.development.jira.impl.SearchConditionTranslator;
 import app.krista.extensions.devsecops.development.jira.util.IssueMapper;
 import app.krista.extensions.devsecops.development.jira.util.JiraConstants;
 import app.krista.model.base.EntityValue;
@@ -91,31 +93,35 @@ public final class StoryImpl extends EntityImplementationService {
 
     @Override
     public List<EntityValue> search(EntityType entityType, SearchQuery searchQuery, Long pageIndex, Integer pageSize) {
-        List<SearchCondition> conditions = searchQuery.getSearchConditions();
-        List<EntityValue> list = new ArrayList<>();
-        List<Issue> issues;
-        for (SearchCondition condition : conditions) {
-            String selector = condition.getFieldName();
-            String matchPattern = condition.getOperand() != null ? String.valueOf(condition.getOperand()).trim() : "";
-            switch (selector.toLowerCase(Locale.ROOT)) {
-                case JiraConstants._SUMMARY:
-                    issues = searchBySummaryIssueType(matchPattern, JiraConstants.STORY, pageSize, pageIndex);
-                    list = issues != null ? getEntityList(issues, pageSize, entityType.getEntityName()) : List.of();
-                    break;
-                case JiraConstants._DESCRIPTION:
-                    issues = searchByTextIssueType(matchPattern, JiraConstants.STORY, pageSize, pageIndex);
-                    list = issues != null ? getEntityList(issues, pageSize, entityType.getEntityName()) : List.of();
-                    break;
-                case JiraConstants.STORY_KEY:
-                    Issue issue = getIssueService().getIssueFinal(matchPattern);
-                    list = issue!= null ? getEntityList(List.of(issue), pageSize, entityType.getEntityName()) : List.of();
+        List<SearchCondition> conditions = resolveUserConditions(searchQuery.getSearchConditions());
+        List<QueryClause> clauses = searchQuery.getQueryClauses();
+
+        // Special case: single Story Key lookup by equals or null operator — direct GET
+        if (conditions.size() == 1) {
+            SearchCondition only = conditions.get(0);
+            if ("story key".equalsIgnoreCase(only.getFieldName())
+                    && only.getOperand() != null
+                    && (only.getOperator() == null
+                        || only.getOperator() == SearchCondition.Operator.equals)) {
+                String key = String.valueOf(only.getOperand()).trim();
+                Issue issue = getIssueService().getIssueFinal(key);
+                if (issue != null && JiraConstants.STORY.equalsIgnoreCase(issue.issueType)) {
+                    return List.of(new EntityValue(entityType.getEntityName(), IssueMapper.getStory(issue).toFields()));
+                }
+                return List.of();
             }
         }
-        if (conditions.size() == 1 && list.isEmpty()) {
-            issues = searchBySummaryIssueType("", JiraConstants.STORY, pageSize, pageIndex);
-            list = getEntityList(issues, pageSize, entityType.getEntityName());
+
+        // Build JQL from all conditions and clauses, filtered by issuetype = "Story"
+        String jql = SearchConditionTranslator.toJql(conditions, clauses, JiraConstants.STORY);
+
+        if (jql == null || jql.isBlank()) {
+            List<Issue> issues = searchBySummaryIssueType("", JiraConstants.STORY, pageSize, pageIndex);
+            return getEntityList(issues, pageSize, entityType.getEntityName());
         }
-        return list;
+
+        List<Issue> issues = getIssueService().searchByJQL(jql, pageSize, pageIndex);
+        return getEntityList(issues, pageSize, entityType.getEntityName());
     }
 
     private List<EntityValue> getEntityList(List<Issue> issues, Integer pageSize, String entityName) {

@@ -114,6 +114,7 @@ The returned Issue entity contains comprehensive issue information:
     "issueType": "Bug",
     "created": "2025-01-10T09:00:00.000Z",
     "updated": "2025-01-15T14:30:00.000Z",
+    "lastModifiedDate": 1736952600000,
     "dueDate": "2025-01-20",
     "labels": ["authentication", "urgent"],
     "components": ["Login", "Security"],
@@ -142,6 +143,7 @@ The returned Issue entity contains comprehensive issue information:
     "issueType": "Story",
     "created": "2025-01-05T10:15:00.000Z",
     "updated": "2025-01-14T16:45:00.000Z",
+    "lastModifiedDate": 1736869500000,
     "fixVersion": "2.1.0",
     "labels": ["dashboard", "ui"],
     "components": ["Frontend"]

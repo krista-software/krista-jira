@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.util;
@@ -295,5 +295,152 @@ class IssueMapperTest {
         
         assertEquals(specialChars, bug.summary, "Bug should handle special characters");
         assertEquals("DEMO-123", bug.bugKey, "Bug key should be mapped correctly");
+    }
+
+    // ========================================
+    // getStory() Tests
+    // ========================================
+
+    @Test
+    @DisplayName("getStory: Should map all fields from Issue to Story correctly")
+    void testGetStory_AllFields_MapsCorrectly() {
+        sampleIssue.parentKey = "EPIC-10";
+        sampleIssue.createdDate = 1700000000000L;
+        sampleIssue.lastModifiedDate = 1700100000000L;
+
+        Story result = IssueMapper.getStory(sampleIssue);
+
+        assertNotNull(result);
+        assertEquals(sampleIssue.key, result.storyKey);
+        assertEquals(sampleIssue.issueType, result.storyType);
+        assertEquals(sampleIssue.parentKey, result.parentKey);
+        assertEquals(sampleIssue.summary, result.summary);
+        assertEquals(sampleIssue.id, result.id);
+        assertEquals(sampleIssue.createdDate, result.createdDate);
+        assertEquals(sampleIssue.lastModifiedDate, result.lastModifiedDate);
+    }
+
+    // ========================================
+    // getSubtask() Tests
+    // ========================================
+
+    @Test
+    @DisplayName("getSubtask: Should map all fields from Issue to Subtask correctly")
+    void testGetSubtask_AllFields_MapsCorrectly() {
+        sampleIssue.parentKey = "TASK-5";
+        sampleIssue.createdDate = 1700000000000L;
+        sampleIssue.lastModifiedDate = 1700100000000L;
+
+        Subtask result = IssueMapper.getSubtask(sampleIssue);
+
+        assertNotNull(result);
+        assertEquals(sampleIssue.key, result.key);
+        assertEquals(sampleIssue.issueType, result.taskType);
+        assertEquals(sampleIssue.parentKey, result.parentKey);
+        assertEquals(sampleIssue.summary, result.summary);
+        assertEquals(sampleIssue.id, result.id);
+        assertEquals(sampleIssue.createdDate, result.createdDate);
+        assertEquals(sampleIssue.lastModifiedDate, result.lastModifiedDate);
+    }
+
+    // ========================================
+    // Reverse mapping: getIssue(...) Tests
+    // ========================================
+
+    @Test
+    @DisplayName("getIssue(Epic): Should map all fields from Epic to Issue")
+    void testGetIssueFromEpic() {
+        Epic epic = IssueMapper.getEpic(sampleIssue);
+        Issue result = IssueMapper.getIssue(epic);
+
+        assertEquals(sampleIssue.key, result.key);
+        assertEquals(sampleIssue.issueType, result.issueType);
+        assertEquals(sampleIssue.summary, result.summary);
+        assertEquals(sampleIssue.id, result.id);
+        assertEquals(sampleIssue.comments, result.comments);
+    }
+
+    @Test
+    @DisplayName("getIssue(Bug): Should map all fields from Bug to Issue")
+    void testGetIssueFromBug() {
+        sampleIssue.parentKey = "EPIC-1";
+        Bug bug = IssueMapper.getBug(sampleIssue);
+        Issue result = IssueMapper.getIssue(bug);
+
+        assertEquals(sampleIssue.key, result.key);
+        assertEquals(sampleIssue.issueType, result.issueType);
+        assertEquals(sampleIssue.parentKey, result.parentKey);
+        assertEquals(sampleIssue.summary, result.summary);
+    }
+
+    @Test
+    @DisplayName("getIssue(Story): Should map all fields from Story to Issue")
+    void testGetIssueFromStory() {
+        sampleIssue.parentKey = "EPIC-2";
+        Story story = IssueMapper.getStory(sampleIssue);
+        Issue result = IssueMapper.getIssue(story);
+
+        assertEquals(sampleIssue.key, result.key);
+        assertEquals(sampleIssue.issueType, result.issueType);
+        assertEquals(sampleIssue.parentKey, result.parentKey);
+        assertEquals(sampleIssue.summary, result.summary);
+    }
+
+    @Test
+    @DisplayName("getIssue(Task): Should map all fields from Task to Issue")
+    void testGetIssueFromTask() {
+        sampleIssue.parentKey = "EPIC-3";
+        Task task = IssueMapper.getTask(sampleIssue);
+        Issue result = IssueMapper.getIssue(task);
+
+        assertEquals(sampleIssue.key, result.key);
+        assertEquals(sampleIssue.issueType, result.issueType);
+        assertEquals(sampleIssue.parentKey, result.parentKey);
+        assertEquals(sampleIssue.summary, result.summary);
+    }
+
+    @Test
+    @DisplayName("getIssue(Subtask): Should map all fields from Subtask to Issue")
+    void testGetIssueFromSubtask() {
+        sampleIssue.parentKey = "TASK-1";
+        Subtask subtask = IssueMapper.getSubtask(sampleIssue);
+        Issue result = IssueMapper.getIssue(subtask);
+
+        assertEquals(sampleIssue.key, result.key);
+        assertEquals(sampleIssue.issueType, result.issueType);
+        assertEquals(sampleIssue.parentKey, result.parentKey);
+        assertEquals(sampleIssue.summary, result.summary);
+    }
+
+    // ========================================
+    // New date fields mapping Tests
+    // ========================================
+
+    @Test
+    @DisplayName("All forward mappers: Should map createdDate and lastModifiedDate")
+    void testForwardMappers_DateFields() {
+        sampleIssue.createdDate = 1700000000000L;
+        sampleIssue.lastModifiedDate = 1700100000000L;
+        sampleIssue.parentKey = "PARENT-1";
+
+        Epic epic = IssueMapper.getEpic(sampleIssue);
+        assertEquals(1700000000000L, epic.createdDate);
+        assertEquals(1700100000000L, epic.lastModifiedDate);
+
+        Task task = IssueMapper.getTask(sampleIssue);
+        assertEquals(1700000000000L, task.createdDate);
+        assertEquals(1700100000000L, task.lastModifiedDate);
+
+        Bug bug = IssueMapper.getBug(sampleIssue);
+        assertEquals(1700000000000L, bug.createdDate);
+        assertEquals(1700100000000L, bug.lastModifiedDate);
+
+        Story story = IssueMapper.getStory(sampleIssue);
+        assertEquals(1700000000000L, story.createdDate);
+        assertEquals(1700100000000L, story.lastModifiedDate);
+
+        Subtask subtask = IssueMapper.getSubtask(sampleIssue);
+        assertEquals(1700000000000L, subtask.createdDate);
+        assertEquals(1700100000000L, subtask.lastModifiedDate);
     }
 }

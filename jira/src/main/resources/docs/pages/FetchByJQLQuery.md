@@ -8,7 +8,7 @@ Initiate a search operation in JIRA using JQL (JIRA Query Language) syntax to fi
 
 - **Area**: Rituals
 - **Type**: QUERY_SYSTEM
-- **Retry Support**: ✅ Yes (with JQL validation and syntax help)
+- **Retry Support**: ❌ No (invalid or failed JQL returns empty list — see Error Handling)
 
 ## Input Parameters
 
@@ -48,30 +48,19 @@ The Task ID is used with the [Get Results for Fetch Issues by JQL Query](pages/G
 - Better performance for complex queries
 - Timeout management for long-running queries
 
-## Validation Rules
-
-| Validation | Error Message | Resolution |
-|------------|---------------|------------|
-| JQL syntax | The JQL query 'QUERY' contains errors and cannot be executed. Error details: DETAILS. Please review the query syntax and ensure: • Field names are spelled correctly • Operators are valid (=, !=, >, <, IN, etc.) • String values are in quotes • Parentheses are balanced | Fix JQL syntax errors based on provided details |
-| Field names | Invalid field name in JQL query | Use valid JIRA field names (project, status, assignee, etc.) |
-| Operators | Invalid operator in JQL query | Use valid JQL operators (=, !=, >, <, >=, <=, IN, NOT IN, ~, !~) |
-| Functions | Invalid function in JQL query | Use valid JQL functions (currentUser(), now(), startOfDay(), etc.) |
-| Quotes | String values must be quoted in JQL | Enclose string values in double quotes |
-| Parentheses | Unbalanced parentheses in JQL query | Ensure all opening parentheses have matching closing parentheses |
-
 ## Error Handling
+
+### Invalid or Failed JQL Query
+- **Cause**: Invalid JQL syntax, bad field names, non-existent projects, or any Jira API error
+- **Behaviour**: The error is logged at `ERROR` level in the extension logs. An **empty issue list** is returned to the workflow via the Task ID — no human prompt, no re-entry flow, no indefinite wait
+- **Common Scenarios**: Syntax errors, invalid field names, non-existent projects, special characters not handled by the caller
+- **Resolution**: Check extension logs for the full JQL and error detail. Correct the query at the caller (workflow/script) level and re-invoke
 
 ### Input Errors (INPUT_ERROR)
 - **Cause**: Empty or missing JQL query
 - **Error Message**: "Required field is missing. Please provide a value for this field to continue."
 - **Common Scenarios**: No JQL query provided
 - **Resolution**: Provide a valid JQL query string
-
-### Logic Errors (LOGIC_ERROR)
-- **Cause**: Invalid JQL syntax or unsupported query elements
-- **Error Message**: "The JQL query 'project = INVALID' contains errors and cannot be executed. Error details: Project 'INVALID' does not exist."
-- **Common Scenarios**: Syntax errors, invalid field names, non-existent projects
-- **Resolution**: Correct JQL syntax and verify field/value existence
 
 ### System Errors (SYSTEM_ERROR)
 - **Cause**: JIRA API unavailable or query processing issues
@@ -126,18 +115,18 @@ The Task ID is used with the [Get Results for Fetch Issues by JQL Query](pages/G
 
 **Result**: Task ID generated for retrieving recent issues from multiple projects
 
-### Example 4: Retry Scenario - Invalid JQL Syntax
+### Example 4: Invalid JQL Syntax — Empty List Returned
 **Input:**
 - JQL Query: `project = DEMO AND status =`
 
 **Expected Output:**
 ```json
 {
-  "error": "The JQL query 'project = DEMO AND status =' contains errors and cannot be executed. Error details: Incomplete expression. Please review the query syntax and ensure: • Field names are spelled correctly • Operators are valid (=, !=, >, <, IN, etc.) • String values are in quotes • Parentheses are balanced"
+  "Task ID": "jql_query_12347_67893"
 }
 ```
 
-**Result**: User prompted to correct JQL syntax with specific guidance
+**Result**: Task ID is returned immediately. The async execution fails, error is logged in extension logs, and `Get Results for Fetch Issues by JQL Query` returns an empty list. No re-entry prompt is shown.
 
 ## Business Rules
 
@@ -200,20 +189,20 @@ The Task ID is used with the [Get Results for Fetch Issues by JQL Query](pages/G
 ## Technical Implementation
 
 - **Helper Class**: `app.krista.extensions.devsecops.development.jira.impl.IssueDao`
-- **Validation Flow**: JQL syntax validation → Query parsing → Execution initiation → Task ID generation
+- **Execution Flow**: Task ID generation → Async query submission → Event fired on completion (success or failure)
 - **Service Delegation**: Delegates to JIRA REST API v3 search endpoints with async processing
 - **Telemetry Metrics**: Tracks query complexity, execution time, success rates, and error patterns
 
 ## Troubleshooting
 
 ### JQL Syntax Errors
-**Problem**: Query validation fails with syntax errors
+**Problem**: Query fails silently — `Get Results for Fetch Issues by JQL Query` returns an empty list
 **Solution**:
-1. Test query in JIRA's issue navigator first
-2. Check field names match your JIRA configuration exactly
-3. Ensure string values are properly quoted
-4. Verify parentheses are balanced
-5. Use JIRA's JQL documentation for reference
+1. Check extension logs for `JQL query failed` ERROR entry with the full JQL and error detail
+2. Test the query in JIRA's issue navigator first
+3. Check field names match your JIRA configuration exactly
+4. Ensure string values are properly quoted
+5. Avoid special characters `[ ] ( )` in `~` (contains) search values — use plain text terms instead
 
 ### Permission Errors
 **Problem**: Query fails due to insufficient permissions

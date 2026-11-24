@@ -20,13 +20,13 @@ Create a new JIRA issue with comprehensive details including project assignment,
 | Issue Type | Text | Yes | Type of issue to create | `Bug`, `Story`, `Task`, `Epic` |
 | Priority | Text | No | Priority level for the issue | `High`, `Medium`, `Low`, `Critical` |
 | Assignee | Text | No | Account ID of the user to assign the issue to | `5d7c8a9b1234567890abcdef` |
-| Reporter | Text | No | Account ID of the user reporting the issue | `5d7c8a9b1234567890abcdef` |
+| Reporter Account Id | Text | No | Atlassian account ID of the reporter. If not provided, the authenticated user will be the reporter. | `712020:f540c563-d057-4be0-999a-4cbdb5fb8d84` |
 | Labels | Text | No | Comma-separated list of labels to apply | `bug,authentication,urgent` |
 | Components | Text | No | Comma-separated list of project components | `Frontend,Authentication` |
 | Fix Version | Text | No | Version where the issue should be fixed | `1.2.0` |
 | Due Date | Text | No | Due date for the issue (YYYY-MM-DD format) | `2025-12-31` |
 | Environment | Text | No | Environment where the issue occurs | `Production` |
-| Custom Field Values | Text | No | JSON string of custom field values | `{"customfield_10001": "value"}` |
+| Custom Field | List `[ { Key, Value } ]` | Conditional | Custom and project-required Jira fields to set on the new issue — one entry per field, where **Key** is the field's exact display name on the Jira create screen (case-insensitive) and **Value** is the value to set. Pass an empty list when the issue type needs no extra fields. | `[{ "Key": "Category", "Value": "R&D Task" }]` |
 
 ### Parameter Details
 
@@ -40,6 +40,11 @@ Create a new JIRA issue with comprehensive details including project assignment,
 - Maximum length: 255 characters
 - Should clearly identify the problem or requirement
 
+**Description**
+- Supports plain text and HTML formatting
+- Supported HTML tags: `<p>`, `<b>`, `<strong>`, `<i>`, `<em>`, `<u>`, `<s>`, `<del>`, `<strike>`, `<code>`, `<a href="...">`, `<br>`, `<h1>`–`<h6>`, `<blockquote>`
+- Unsupported HTML tags are converted to plain text
+
 **Issue Type**
 - Must be a valid issue type configured in the target project
 - Common types: Bug, Story, Task, Epic, Sub-task
@@ -50,10 +55,23 @@ Create a new JIRA issue with comprehensive details including project assignment,
 - Common priorities: Blocker, Critical, High, Medium, Low
 - Optional - defaults to project default priority
 
-**Assignee/Reporter**
-- Must be valid JIRA account IDs (not usernames)
+**Assignee/Reporter Account Id**
+- Must be valid Atlassian account IDs (not usernames or email addresses)
 - Users must exist and have access to the project
-- Optional - defaults to current user for reporter
+- Reporter defaults to the authenticated user if not provided
+- Setting a reporter requires the "Modify Reporter" project permission in Jira
+
+**Custom Field**
+- A list with **one entry per field**, each of the form `{ "Key": <field name>, "Value": <value> }`
+- **Key** is the field's exact display name as it appears on the Jira create screen (case-insensitive) — e.g. `Category`, `Customer`, `Due date`. Do **not** use it for the standard Summary, Description, Issue Type, Project, or Reporter (those have their own inputs)
+- **Value** format depends on the field type:
+  - Text field → plain text
+  - Single- or multi-select (option) field → the exact option label (e.g. `Category = R&D Task`)
+  - Date field → `YYYY-MM-DD` (e.g. `Due date = 2026-09-01`)
+  - People field → an Atlassian account/user identifier
+- Different projects and issue types require different fields — include one entry for **each** field the target project/issue type needs. For example: `DIR/Task` requires `Category`; `KE/Task` and `KE/Bug` require `Customer` and `Due date`
+- If the issue type needs no extra fields, pass an **empty list**
+- The extension does not pre-validate these values — the request is sent to Jira, which is the authority on which fields and values are valid. If Jira rejects the create, its own field-level error (e.g. *"Category is required"*) is surfaced in the error message
 
 ## Output Parameters
 
@@ -162,7 +180,37 @@ The returned Issue entity contains:
 }
 ```
 
-### Example 3: Retry Scenario - Invalid Project
+### Example 3: Create with Required Custom Fields
+**Input:**
+- Project Key: `KE`
+- Summary: `Investigate flaky pipeline`
+- Issue Type: `Task`
+- Description: `The nightly build fails intermittently on the integration stage`
+- Custom Field:
+```json
+[
+  { "Key": "Customer", "Value": "KristaInternal" },
+  { "Key": "Due date", "Value": "2026-09-01" }
+]
+```
+
+**Expected Output:**
+```json
+{
+  "New Issue": {
+    "id": "34567",
+    "key": "KE-3498",
+    "summary": "Investigate flaky pipeline",
+    "status": "To Do",
+    "issueType": "Task",
+    "projectKey": "KE"
+  }
+}
+```
+
+> If a required field is omitted (e.g. `Customer`), Jira rejects the create and the error surfaces the missing field, for example: *"Jira rejected the create: Customer: Customer is required"*.
+
+### Example 4: Retry Scenario - Invalid Project
 **Input:**
 - Project Key: `INVALID`
 - Summary: `Test issue`

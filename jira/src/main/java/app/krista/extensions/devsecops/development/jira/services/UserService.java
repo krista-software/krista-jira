@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.services;
@@ -21,7 +21,7 @@ package app.krista.extensions.devsecops.development.jira.services;
 import app.krista.extension.authorization.MustAuthorizeException;
 import app.krista.extension.executor.ExtensionResponse;
 import app.krista.extensions.devsecops.development.jira.catalog.entities.User;
-import app.krista.extensions.devsecops.development.jira.catalog.extresp.ExtensionResponseFactory;
+import app.krista.sdk.atlassian.extresp.ExtensionResponseFactory;
 import app.krista.extensions.devsecops.development.jira.impl.UserDao;
 import app.krista.extensions.devsecops.development.jira.util.TelemetryConstants;
 import app.krista.ksdk.telemetry.TelemetryMetrics;

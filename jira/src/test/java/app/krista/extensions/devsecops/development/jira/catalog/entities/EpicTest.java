@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -96,7 +96,7 @@ class EpicTest {
         
         // Assert
         assertNotNull(fieldMap);
-        assertEquals(11, fieldMap.size());
+        assertEquals(13, fieldMap.size());
         assertEquals("Test Epic", fieldMap.get("Summary"));
         assertEquals(comments, fieldMap.get("Comments"));
         assertEquals("Reporter", fieldMap.get("Reporter Name"));
@@ -108,6 +108,8 @@ class EpicTest {
         assertEquals("Epic", fieldMap.get("Type"));
         assertEquals("High", fieldMap.get("Priority"));
         assertEquals("Open", fieldMap.get("Status"));
+        assertNull(fieldMap.get("Created Date"));
+        assertNull(fieldMap.get("Last Modified Date"));
     }
 
     @Test

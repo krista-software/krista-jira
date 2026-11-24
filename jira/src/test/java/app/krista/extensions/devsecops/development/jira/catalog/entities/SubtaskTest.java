@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -97,7 +97,7 @@ class SubtaskTest {
 
         // Assert
         assertNotNull(fieldMap);
-        assertEquals(12, fieldMap.size());
+        assertEquals(14, fieldMap.size());
         assertEquals("Test Subtask", fieldMap.get("Summary"));
         assertEquals(comments, fieldMap.get("Comments"));
         assertEquals("Reporter", fieldMap.get("Reporter Name"));

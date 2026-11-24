@@ -13,35 +13,26 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.errorhandlers;
 
 import app.krista.extensions.util.KeyValueStore;
 import org.jvnet.hk2.annotations.Service;
+
 import javax.inject.Inject;
-import java.util.Map;
 
-import static app.krista.extensions.devsecops.development.jira.util.JiraConstants.GSON;
-
+/**
+ * HK2 service wrapper around the shared SDK
+ * {@link app.krista.sdk.atlassian.state.ErrorHandlingStateManager}. Kept so
+ * existing injection points remain valid.
+ */
 @Service
-public class ErrorHandlingStateManager {
-
-    private final KeyValueStore internalState;
+public class ErrorHandlingStateManager extends app.krista.sdk.atlassian.state.ErrorHandlingStateManager {
 
     @Inject
     public ErrorHandlingStateManager(KeyValueStore internalState) {
-        this.internalState = internalState;
-
-    }
-
-    public void put(String key, Object value) {
-        internalState.put(key, value);
-    }
-
-    public Map<String, Object> get(String key) {
-        final String map = String.valueOf(internalState.get(key));
-        return GSON.fromJson(map, Map.class);
+        super(internalState);
     }
 }

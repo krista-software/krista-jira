@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.impl;
@@ -86,6 +86,18 @@ public class WebhookDaoTest {
     public void testParseWebhookResponse_NullJson() {
         Map<String, Object> result = webhookDao.parseWebhookResponse(null);
         assertTrue("Result should be empty", result.isEmpty());
+    }
+
+    /**
+     * JSON that Gson parses leniently (so {@code extractIssueKey} succeeds) but Jackson rejects
+     * (the {@code NaN} token) — exercising the {@code IOException} catch that returns an empty map
+     * instead of propagating.
+     */
+    @Test
+    public void testParseWebhookResponse_JacksonIOException_ReturnsEmptyMap() {
+        String lenientButInvalidForJackson = "{\"issue\":{\"key\":\"KE-9\"},\"bad\":NaN}";
+        Map<String, Object> result = webhookDao.parseWebhookResponse(lenientButInvalidForJackson);
+        assertTrue("IOException path returns an empty map", result.isEmpty());
     }
 
 }

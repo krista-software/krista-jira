@@ -13,31 +13,51 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.extresp;
 
 import app.krista.extensions.devsecops.development.jira.catalog.validators.FieldAttributeExtractor;
 import app.krista.model.field.NamedField;
-import com.google.gson.Gson;
+import app.krista.sdk.atlassian.extresp.FieldTypeResolver;
 
-import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Thin Jira-specific wrapper around the shared SDK
+ * {@link app.krista.sdk.atlassian.extresp.NamedFieldFactory}, wiring field
+ * type resolution to Jira's {@link FieldAttributeExtractor}.
+ */
 public class NamedFieldFactory {
 
-    private static final Gson GSON = new Gson();
+    /** Adapts {@link FieldAttributeExtractor}'s static helpers to the SDK resolver SPI. */
+    private static final FieldTypeResolver RESOLVER = new FieldTypeResolver() {
+        @Override
+        public boolean isListField(String fieldType) {
+            return FieldAttributeExtractor.isListField(fieldType);
+        }
+
+        @Override
+        public String extractInnerFieldType(String fieldType) {
+            return FieldAttributeExtractor.extractInnerFieldType(fieldType);
+        }
+
+        @Override
+        public String getKristaFieldType(String fieldType) {
+            return FieldAttributeExtractor.getKristaFieldType(fieldType);
+        }
+    };
 
     private NamedFieldFactory() {
     }
 
     public static NamedField createTextField(String fieldName) {
-        return new NamedField(fieldName, FieldTypes.TEXT_FIELD, Map.of(), Map.of());
+        return app.krista.sdk.atlassian.extresp.NamedFieldFactory.createTextField(fieldName);
     }
 
     public static NamedField createSwitchField(String fieldName) {
-        return new NamedField(fieldName, FieldTypes.SWITCH_FIELD, Map.of(), Map.of());
+        return app.krista.sdk.atlassian.extresp.NamedFieldFactory.createSwitchField(fieldName);
     }
 
     /**
@@ -50,11 +70,8 @@ public class NamedFieldFactory {
      * @return The created NamedField
      */
     public static NamedField createFieldWithAttributes(String fieldName, String fieldType, Map<String, Object> fieldAttributes) {
-        if (FieldAttributeExtractor.isListField(fieldType)) {
-            return createListField(fieldName, fieldType, fieldAttributes);
-        } else {
-            return createSimpleField(fieldName, fieldType, fieldAttributes);
-        }
+        return app.krista.sdk.atlassian.extresp.NamedFieldFactory
+                .createFieldWithAttributes(fieldName, fieldType, fieldAttributes, RESOLVER);
     }
 
     /**
@@ -66,18 +83,8 @@ public class NamedFieldFactory {
      * @return The created list field
      */
     public static NamedField createListField(String fieldName, String fieldType, Map<String, Object> fieldAttributes) {
-        String innerFieldType = FieldAttributeExtractor.extractInnerFieldType(fieldType);
-        String innerKristaFieldType = FieldAttributeExtractor.getKristaFieldType(innerFieldType);
-
-        // Create the inner field configuration
-        Map<String, Object> innerFieldConfig = new HashMap<>();
-        innerFieldConfig.put("fieldType", innerKristaFieldType);
-
-        // Create the list field attributes
-        Map<String, Object> listAttributes = new HashMap<>();
-        listAttributes.put("field", GSON.toJson(innerFieldConfig));
-
-        return new NamedField(fieldName, FieldTypes.LIST_FIELD, listAttributes, Map.of());
+        return app.krista.sdk.atlassian.extresp.NamedFieldFactory
+                .createListField(fieldName, fieldType, fieldAttributes, RESOLVER);
     }
 
     /**
@@ -89,8 +96,8 @@ public class NamedFieldFactory {
      * @return The created field
      */
     public static NamedField createSimpleField(String fieldName, String fieldType, Map<String, Object> fieldAttributes) {
-        String kristaFieldType = FieldAttributeExtractor.getKristaFieldType(fieldType);
-        return new NamedField(fieldName, kristaFieldType, Map.of(), Map.of());
+        return app.krista.sdk.atlassian.extresp.NamedFieldFactory
+                .createSimpleField(fieldName, fieldType, fieldAttributes, RESOLVER);
     }
 
 }

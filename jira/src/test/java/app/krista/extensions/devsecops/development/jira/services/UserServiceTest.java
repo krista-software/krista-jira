@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.services;
@@ -176,6 +176,22 @@ public class UserServiceTest {
         user.email = "simran.sethi@kristasoft.com";
         user.accountType = "atlassian";
         return user;
+    }
+
+    @Test
+    public void testGetUserAccountInformation_GenericException_ReturnsErrorResponse() {
+        // Given
+        String searchQuery = "test@example.com";
+        when(mockedUserDao.getUserByEmailOrName(searchQuery))
+                .thenThrow(new RuntimeException("Database connection failed"));
+
+        // When
+        ExtensionResponse response = userService.getUserAccountInformation(searchQuery);
+
+        // Then - general Exception catch block: returns SYSTEM_ERROR response
+        Assert.assertNotNull(response);
+        // Verify failure telemetry was recorded
+        verify(mockedTelemetryMetrics, atLeastOnce()).incrementCounter(anyString(), eq(1L));
     }
 }
 

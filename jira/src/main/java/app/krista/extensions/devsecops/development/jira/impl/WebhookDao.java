@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.impl;
@@ -24,6 +24,8 @@ import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.JsonObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.StringReader;
@@ -32,6 +34,8 @@ import java.util.*;
 import static app.krista.extensions.devsecops.development.jira.util.JiraConstants.*;
 
 public class WebhookDao {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(WebhookDao.class);
 
     /**
      * Parses the webhook response and creates a map with details.
@@ -49,7 +53,7 @@ public class WebhookDao {
             sortByLargestMap(parsedResponse);
             return createResponseDetails(parsedResponse, issueKey);
         } catch (IOException cause) {
-            System.err.println("Error parsing JSON response: " + cause.getMessage());
+            LOGGER.warn("Error parsing JSON response: {}", cause.getMessage());
             return Collections.emptyMap();
         }
     }

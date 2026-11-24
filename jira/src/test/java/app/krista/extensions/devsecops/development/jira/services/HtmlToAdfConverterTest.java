@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.services;
@@ -312,7 +312,7 @@ class HtmlToAdfConverterTest {
     }
 
     @Test
-    @DisplayName("Should handle unsupported tags as paragraphs")
+    @DisplayName("Should handle unsupported tags by extracting text content")
     void testConvert_UnsupportedTags() {
         // Arrange
         String html = "<p><span>Span text</span></p>";
@@ -324,6 +324,275 @@ class HtmlToAdfConverterTest {
         assertNotNull(result);
         JsonArray content = result.getAsJsonArray("content");
         assertTrue(content.size() > 0);
+        JsonObject paragraph = content.get(0).getAsJsonObject();
+        JsonArray paragraphContent = paragraph.getAsJsonArray("content");
+        // Should extract "Span text" as plain text, not create a nested paragraph
+        JsonObject textNode = paragraphContent.get(0).getAsJsonObject();
+        assertEquals("text", textNode.get("type").getAsString());
+        assertEquals("Span text", textNode.get("text").getAsString());
+    }
+
+    @Test
+    @DisplayName("Should convert <strong> tag to strong mark")
+    void testConvert_StrongTag() {
+        String html = "<p><strong>Bold text</strong></p>";
+        JsonObject result = converter.convert(html);
+
+        JsonArray content = result.getAsJsonArray("content");
+        JsonObject paragraph = content.get(0).getAsJsonObject();
+        JsonArray paragraphContent = paragraph.getAsJsonArray("content");
+        JsonObject textNode = paragraphContent.get(0).getAsJsonObject();
+
+        assertEquals("text", textNode.get("type").getAsString());
+        assertEquals("Bold text", textNode.get("text").getAsString());
+        assertTrue(textNode.has("marks"));
+        assertEquals("strong", textNode.getAsJsonArray("marks").get(0).getAsJsonObject().get("type").getAsString());
+    }
+
+    @Test
+    @DisplayName("Should convert <em> tag to em mark")
+    void testConvert_EmTag() {
+        String html = "<p><em>Italic text</em></p>";
+        JsonObject result = converter.convert(html);
+
+        JsonArray content = result.getAsJsonArray("content");
+        JsonObject paragraph = content.get(0).getAsJsonObject();
+        JsonArray paragraphContent = paragraph.getAsJsonArray("content");
+        JsonObject textNode = paragraphContent.get(0).getAsJsonObject();
+
+        assertEquals("text", textNode.get("type").getAsString());
+        assertEquals("Italic text", textNode.get("text").getAsString());
+        assertTrue(textNode.has("marks"));
+        assertEquals("em", textNode.getAsJsonArray("marks").get(0).getAsJsonObject().get("type").getAsString());
+    }
+
+    @Test
+    @DisplayName("Should convert strikethrough tags to strike mark")
+    void testConvert_StrikethroughTags() {
+        for (String tag : new String[]{"s", "del", "strike"}) {
+            String html = "<p><" + tag + ">Strikethrough</" + tag + "></p>";
+            JsonObject result = converter.convert(html);
+
+            JsonArray content = result.getAsJsonArray("content");
+            JsonObject paragraph = content.get(0).getAsJsonObject();
+            JsonArray paragraphContent = paragraph.getAsJsonArray("content");
+            JsonObject textNode = paragraphContent.get(0).getAsJsonObject();
+
+            assertEquals("text", textNode.get("type").getAsString());
+            assertTrue(textNode.has("marks"), "Missing marks for <" + tag + ">");
+            assertEquals("strike", textNode.getAsJsonArray("marks").get(0).getAsJsonObject().get("type").getAsString(),
+                    "Wrong mark type for <" + tag + ">");
+        }
+    }
+
+    @Test
+    @DisplayName("Should convert <code> tag to code mark")
+    void testConvert_CodeTag() {
+        String html = "<p><code>inline code</code></p>";
+        JsonObject result = converter.convert(html);
+
+        JsonArray content = result.getAsJsonArray("content");
+        JsonObject paragraph = content.get(0).getAsJsonObject();
+        JsonArray paragraphContent = paragraph.getAsJsonArray("content");
+        JsonObject textNode = paragraphContent.get(0).getAsJsonObject();
+
+        assertEquals("text", textNode.get("type").getAsString());
+        assertEquals("inline code", textNode.get("text").getAsString());
+        assertTrue(textNode.has("marks"));
+        assertEquals("code", textNode.getAsJsonArray("marks").get(0).getAsJsonObject().get("type").getAsString());
+    }
+
+    @Test
+    @DisplayName("Should convert <a> tag to text with link mark")
+    void testConvert_LinkTag() {
+        String html = "<p><a href=\"https://example.com\">Click here</a></p>";
+        JsonObject result = converter.convert(html);
+
+        JsonArray content = result.getAsJsonArray("content");
+        JsonObject paragraph = content.get(0).getAsJsonObject();
+        JsonArray paragraphContent = paragraph.getAsJsonArray("content");
+        JsonObject textNode = paragraphContent.get(0).getAsJsonObject();
+
+        assertEquals("text", textNode.get("type").getAsString());
+        assertEquals("Click here", textNode.get("text").getAsString());
+        assertTrue(textNode.has("marks"));
+
+        JsonObject linkMark = textNode.getAsJsonArray("marks").get(0).getAsJsonObject();
+        assertEquals("link", linkMark.get("type").getAsString());
+        assertTrue(linkMark.has("attrs"));
+        assertEquals("https://example.com", linkMark.getAsJsonObject("attrs").get("href").getAsString());
+    }
+
+    @Test
+    @DisplayName("Should convert <br> to hardBreak node")
+    void testConvert_HardBreak() {
+        String html = "<p>Line one<br>Line two</p>";
+        JsonObject result = converter.convert(html);
+
+        JsonArray content = result.getAsJsonArray("content");
+        JsonObject paragraph = content.get(0).getAsJsonObject();
+        JsonArray paragraphContent = paragraph.getAsJsonArray("content");
+
+        // Should have: text("Line one"), hardBreak, text("Line two")
+        boolean hasHardBreak = false;
+        for (int i = 0; i < paragraphContent.size(); i++) {
+            if ("hardBreak".equals(paragraphContent.get(i).getAsJsonObject().get("type").getAsString())) {
+                hasHardBreak = true;
+                break;
+            }
+        }
+        assertTrue(hasHardBreak, "Should contain a hardBreak node");
+    }
+
+    @Test
+    @DisplayName("Should convert heading tags to heading nodes with level")
+    void testConvert_Headings() {
+        for (int level = 1; level <= 6; level++) {
+            String html = "<h" + level + ">Heading " + level + "</h" + level + ">";
+            JsonObject result = converter.convert(html);
+
+            JsonArray content = result.getAsJsonArray("content");
+            JsonObject heading = content.get(0).getAsJsonObject();
+
+            assertEquals("heading", heading.get("type").getAsString(), "Wrong type for h" + level);
+            assertTrue(heading.has("attrs"), "Missing attrs for h" + level);
+            assertEquals(level, heading.getAsJsonObject("attrs").get("level").getAsInt(), "Wrong level for h" + level);
+
+            JsonArray headingContent = heading.getAsJsonArray("content");
+            JsonObject textNode = headingContent.get(0).getAsJsonObject();
+            assertEquals("Heading " + level, textNode.get("text").getAsString());
+        }
+    }
+
+    @Test
+    @DisplayName("Should convert <blockquote> to blockquote node")
+    void testConvert_Blockquote() {
+        String html = "<blockquote><p>Quoted text</p></blockquote>";
+        JsonObject result = converter.convert(html);
+
+        JsonArray content = result.getAsJsonArray("content");
+        JsonObject blockquote = content.get(0).getAsJsonObject();
+
+        assertEquals("blockquote", blockquote.get("type").getAsString());
+        assertTrue(blockquote.has("content"));
+
+        JsonArray bqContent = blockquote.getAsJsonArray("content");
+        JsonObject paragraph = bqContent.get(0).getAsJsonObject();
+        assertEquals("paragraph", paragraph.get("type").getAsString());
+    }
+
+    @Test
+    @DisplayName("Should handle nested marks correctly (bold inside italic)")
+    void testConvert_NestedMarks() {
+        String html = "<p><strong><em>Bold and italic</em></strong></p>";
+        JsonObject result = converter.convert(html);
+
+        JsonArray content = result.getAsJsonArray("content");
+        JsonObject paragraph = content.get(0).getAsJsonObject();
+        JsonArray paragraphContent = paragraph.getAsJsonArray("content");
+        JsonObject textNode = paragraphContent.get(0).getAsJsonObject();
+
+        assertEquals("Bold and italic", textNode.get("text").getAsString());
+        assertTrue(textNode.has("marks"));
+        JsonArray marks = textNode.getAsJsonArray("marks");
+        assertEquals(2, marks.size());
+    }
+
+    @Test
+    @DisplayName("Should handle null input gracefully")
+    void testConvert_NullInput() {
+        JsonObject result = converter.convert(null);
+        assertNotNull(result);
+        assertEquals("doc", result.get("type").getAsString());
+        assertEquals(1, result.get("version").getAsInt());
+        assertEquals(0, result.getAsJsonArray("content").size());
+    }
+
+    @Test
+    @DisplayName("Should handle <a> tag with empty href")
+    void testConvert_LinkWithEmptyHref() {
+        String html = "<p><a href=\"\">Link text</a></p>";
+        JsonObject result = converter.convert(html);
+
+        assertNotNull(result);
+        JsonArray content = result.getAsJsonArray("content");
+        assertTrue(content.size() > 0);
+        JsonObject paragraph = content.get(0).getAsJsonObject();
+        JsonArray paragraphContent = paragraph.getAsJsonArray("content");
+        JsonObject textNode = paragraphContent.get(0).getAsJsonObject();
+        assertEquals("text", textNode.get("type").getAsString());
+        assertEquals("Link text", textNode.get("text").getAsString());
+        assertTrue(textNode.has("marks"));
+        assertEquals("link", textNode.getAsJsonArray("marks").get(0).getAsJsonObject().get("type").getAsString());
+    }
+
+    @Test
+    @DisplayName("Should handle blockquote with plain text (no p child)")
+    void testConvert_BlockquoteWithPlainText() {
+        String html = "<blockquote>Plain quoted text</blockquote>";
+        JsonObject result = converter.convert(html);
+
+        JsonArray content = result.getAsJsonArray("content");
+        JsonObject blockquote = content.get(0).getAsJsonObject();
+        assertEquals("blockquote", blockquote.get("type").getAsString());
+        assertTrue(blockquote.has("content"));
+
+        JsonArray bqContent = blockquote.getAsJsonArray("content");
+        JsonObject paragraph = bqContent.get(0).getAsJsonObject();
+        assertEquals("paragraph", paragraph.get("type").getAsString());
+    }
+
+    @Test
+    @DisplayName("Should handle mixed block elements (p + heading + blockquote)")
+    void testConvert_MixedBlockElements() {
+        String html = "<p>Paragraph</p><h2>Heading</h2><blockquote><p>Quote</p></blockquote>";
+        JsonObject result = converter.convert(html);
+
+        JsonArray content = result.getAsJsonArray("content");
+        assertEquals(3, content.size());
+        assertEquals("paragraph", content.get(0).getAsJsonObject().get("type").getAsString());
+        assertEquals("heading", content.get(1).getAsJsonObject().get("type").getAsString());
+        assertEquals("blockquote", content.get(2).getAsJsonObject().get("type").getAsString());
+    }
+
+    @Test
+    @DisplayName("Should handle the real-world AI answer that caused INVALID_INPUT")
+    void testConvert_RealWorldAIAnswer() {
+        String html = "<p><strong>CTIA</strong> is the trade association whose member companies developed the " +
+                "<em>Messaging Principles and Best Practices</em>.</p>" +
+                "<p><strong>What the Principles cover</strong>: a set of voluntary best practices.</p>" +
+                "<p>For the full document, see: <a href=\"https://api.ctia.org/doc.pdf\">https://api.ctia.org/doc.pdf</a></p>";
+
+        JsonObject result = converter.convert(html);
+
+        assertNotNull(result);
+        assertEquals("doc", result.get("type").getAsString());
+        assertEquals(1, result.get("version").getAsInt());
+
+        JsonArray content = result.getAsJsonArray("content");
+        assertEquals(3, content.size());
+
+        // First paragraph should have strong and em marks
+        JsonObject firstPara = content.get(0).getAsJsonObject();
+        assertEquals("paragraph", firstPara.get("type").getAsString());
+
+        // Third paragraph should have a link
+        JsonObject thirdPara = content.get(2).getAsJsonObject();
+        JsonArray thirdContent = thirdPara.getAsJsonArray("content");
+        boolean hasLink = false;
+        for (int i = 0; i < thirdContent.size(); i++) {
+            JsonObject node = thirdContent.get(i).getAsJsonObject();
+            if (node.has("marks")) {
+                JsonArray marks = node.getAsJsonArray("marks");
+                for (int j = 0; j < marks.size(); j++) {
+                    if ("link".equals(marks.get(j).getAsJsonObject().get("type").getAsString())) {
+                        hasLink = true;
+                        break;
+                    }
+                }
+            }
+        }
+        assertTrue(hasLink, "Third paragraph should contain a link mark");
     }
 }
 

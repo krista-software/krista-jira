@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package app.krista.extensions.devsecops.development.jira.catalog.entities;
@@ -32,46 +32,54 @@ import app.krista.extension.impl.anno.*;
         ecosystemId = "catEntryEcosystem_98c365b2-ab5a-463a-ac13-6da05a67c417",
         ecosystemName = "Dev Sec Ops",
         ecosystemVersion = "3a0013af-cb88-411e-83f4-f02ad1ea5aa2")
-@Entity(name = "Epic", id = "localDomainEntity_1d6d49bd-74d1-4c71-97e9-48cdc85034f4", primaryKey = "Epic Key", supportStore = false)
+@Entity(name = "Epic", id = "localDomainEntity_1d6d49bd-74d1-4c71-97e9-48cdc85034f4", primaryKey = "Epic Key", supportStore = true, description = "Represents an epic issue in Jira for tracking large bodies of work. Belongs to a Ticket Project (via Project Key). Related to User (Reporter Name and Assignee Name match User.Display Name). Priority references Ticket Priority.Name. Status references Ticket Status.Name. Contains Stories, Tasks, and Bugs that share the same Project Key.")
 public class Epic {
 
     @Searchable
     @ToString
-    @Field(name = "Summary", type = "Text")
+    @Field.Text(name = "Summary", description = "Brief summary of the epic")
     public String summary;
 
-    @Field.Desc(name = "Comments", type = "[ Text ]", required = false)
+    @Field.Desc(name = "Comments", type = "[ Text ]", required = false, description = "List of comments added to the epic")
     public List<String> comments;
 
-    @Field(name = "Reporter Name", type = "Text", required = false)
+    @Field.Text(name = "Reporter Name", description = "Name of the person who reported the epic. References User.Display Name.", required = false)
     public String reporterName;
 
-    @Field(name = "Assignee Name", type = "Text", required = false)
+    @Field.Text(name = "Assignee Name", description = "Name of the person assigned to the epic. References User.Display Name.", required = false)
     public String assigneeName;
 
-    @Field(name = "Type", type = "Text", required = false)
+    @Field.Text(name = "Type", description = "Type classification of the epic", required = false)
     public String type;
     @Searchable
     @ToString
-    @Field(name = "Epic Key", type = "Text", required = false)
+    @Field.Text(name = "Epic Key", description = "Unique Jira key identifier for the epic. Referenced by Subtask.Parent Key for parent-child relationships.", required = false)
     public String epicKey;
 
-    @Field(name = "Id", type = "Text", required = false)
+    @Field.Text(name = "Id", description = "Internal Jira identifier for the epic", required = false)
     public String id;
 
-    @Field(name = "Project Key", type = "Text")
+    @Field.Text(name = "Project Key", description = "Key of the Jira project this epic belongs to. References Ticket Project.Key.")
     public String projectKey;
 
-    @Field(name = "Priority", type = "Text", required = false)
+    @Field.Text(name = "Priority", description = "Priority level of the epic. References Ticket Priority.Name.", required = false)
     public String priority;
 
     @ToString
-    @Field(name = "Status", type = "Text", required = false)
+    @Field.Text(name = "Status", description = "Current workflow status of the epic. References Ticket Status.Name.", required = false)
     public String status;
 
     @Searchable
     @Field(name = "Description", type = "RichText")
     public String description;
+
+    @Searchable
+    @Field.Date(name = "Created Date", required = false, includeTimeOfDay = true, allowPast = true, allowToday = true, allowFuture = true, description = "Date and time when the epic was created", attributes = {@Attribute(name = "visualWidth", value = "S"), @Attribute(name = "dateFormat", value = "'MMM DD, yyyy h:mm:ss a'")}, options = {})
+    public Long createdDate;
+
+    @Searchable
+    @Field.Date(name = "Last Modified Date", required = false, includeTimeOfDay = true, allowPast = true, allowToday = true, allowFuture = true, description = "Date and time when the epic was last modified", attributes = {@Attribute(name = "visualWidth", value = "S"), @Attribute(name = "dateFormat", value = "'MMM DD, yyyy h:mm:ss a'")}, options = {})
+    public Long lastModifiedDate;
 
     public Map<String, Object> toFields() {
         Epic epic = this;
@@ -87,6 +95,8 @@ public class Epic {
         fieldMap.put("Priority", epic.priority);
         fieldMap.put("Status", epic.status);
         fieldMap.put("Description", epic.description);
+        fieldMap.put("Created Date", epic.createdDate);
+        fieldMap.put("Last Modified Date", epic.lastModifiedDate);
         return fieldMap;
     }
 
